@@ -1,0 +1,111 @@
+{
+  "id": "telegram-admin-channel",
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "telegramAccountId": {
+        "type": "string",
+        "description": "Telegram account ID from OpenClaw config (defaults to 'default')"
+      },
+      "channel": {
+        "type": "object",
+        "properties": {
+          "chatId": {
+            "type": "string",
+            "description": "Channel chat ID (@username or -100...)"
+          }
+        },
+        "required": ["chatId"]
+      },
+      "discussion": {
+        "type": "object",
+        "properties": {
+          "chatId": {
+            "type": "string",
+            "description": "Discussion supergroup chat ID"
+          }
+        },
+        "required": ["chatId"]
+      },
+      "ownerAllowFrom": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Telegram user IDs allowed to use admin tools"
+      },
+      "defaults": {
+        "type": "object",
+        "properties": {
+          "silent": {
+            "type": "boolean",
+            "default": false,
+            "description": "Send posts silently (no notification) by default"
+          }
+        }
+      },
+      "dangerousActions": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "default": false,
+            "description": "Enable destructive actions (delete, edit, pin/unpin)"
+          }
+        }
+      },
+      "storage": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": ["json", "sqlite"],
+            "default": "json"
+          }
+        }
+      },
+      "mtproto": {
+        "type": "object",
+        "properties": {
+          "enabled": { "type": "boolean", "default": false },
+          "apiId": { "type": "number" },
+          "apiHash": { "type": "string" },
+          "sessionPath": { "type": "string" }
+        }
+      }
+    },
+    "required": ["channel", "ownerAllowFrom"]
+  },
+  "uiHints": {
+    "channel.chatId": {
+      "label": "Channel ID",
+      "help": "Telegram channel username (@channel) or numeric ID (-100...)"
+    },
+    "discussion.chatId": {
+      "label": "Discussion Group ID",
+      "help": "Supergroup ID linked to the channel for comments"
+    },
+    "ownerAllowFrom": {
+      "label": "Allowed Owner IDs",
+      "help": "Telegram user IDs that can use admin actions"
+    },
+    "defaults.silent": {
+      "label": "Silent by default",
+      "help": "Posts will be sent without notification if enabled"
+    },
+    "mtproto.enabled": {
+      "label": "Enable MTProto Stats",
+      "help": "Enable MTProto-based channel statistics (requires user account session)"
+    },
+    "mtproto.apiId": {
+      "label": "API ID",
+      "help": "Telegram API ID (or set TELEGRAM_API_ID env var)"
+    },
+    "mtproto.apiHash": {
+      "label": "API Hash",
+      "help": "Telegram API Hash (or set TELEGRAM_API_HASH env var)"
+    },
+    "mtproto.sessionPath": {
+      "label": "Session Path",
+      "help": "Path to session file (default: ~/.openclaw/plugins/telegram-admin-channel/mtproto.session)"
+    }
+  }
+}

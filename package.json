@@ -1,0 +1,37 @@
+{
+  "name": "openclaw-telegram-admin-channel-plugin",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "OpenClaw plugin for Telegram channel administration: posts, comments, basic analytics",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "openclaw": {
+    "extensions": [
+      "./dist/index.js"
+    ]
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "mtproto:auth": "node ./dist/mtproto-auth.js"
+  },
+  "dependencies": {
+    "@sinclair/typebox": "^0.34.0",
+    "telegram": "^2.26.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  },
+  "peerDependencies": {
+    "openclaw": ">=2026.2.0"
+  },
+  "peerDependenciesMeta": {
+    "openclaw": {
+      "optional": true
+    }
+  },
+  "license": "MIT"
+}
