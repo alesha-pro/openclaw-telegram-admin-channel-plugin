@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+import { basename } from "node:path";
 import { Type, type Static } from "@sinclair/typebox";
 import { jsonResult } from "openclaw/plugin-sdk";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
@@ -47,8 +49,11 @@ const ToolParameters = Type.Object({
   scheduleDate: Type.Optional(
     Type.Number({ description: "Unix timestamp (UTC) for schedule_post" }),
   ),
-  photoFileId: Type.Optional(
-    Type.String({ description: "Telegram file_id for photo (from hook)" }),
+  photoFileIds: Type.Optional(
+    Type.Array(Type.String(), { description: "Telegram file_id(s) for photo(s); album if multiple" }),
+  ),
+  photoPaths: Type.Optional(
+    Type.Array(Type.String(), { description: "Local file path(s) to photo(s); album if multiple" }),
   ),
 });
 
@@ -73,7 +78,7 @@ const MTPROTO_DESCRIPTION =
   "'get_post_stats' (per-post views/reactions graphs, requires 'messageId'), " +
   "'get_history' (channel message history, optional 'limit' and 'offsetId'). " +
   "Scheduled posts: " +
-  "'schedule_post' (text or photo, requires 'scheduleDate' as unix timestamp UTC; optional 'photoFileId' for media, 'text' as caption), " +
+  "'schedule_post' (text or photo/album, requires 'scheduleDate'; use 'photoPaths' for local files or 'photoFileIds' for Telegram file_ids, multiple = album; 'text' as caption), " +
   "'list_scheduled' (list all pending scheduled messages), " +
   "'delete_scheduled' (requires 'messageIds'), " +
   "'send_scheduled_now' (publish scheduled messages immediately, requires 'messageIds').";
@@ -150,7 +155,7 @@ async function executeAction(
     case "get_history":
       return executeGetHistory(params, pluginConfig, mtprotoClient);
     case "schedule_post":
-      return executeSchedulePost(params, pluginConfig, mtprotoClient);
+      return executeSchedulePost(params, pluginConfig, api, mtprotoClient);
     case "list_scheduled":
       return executeListScheduled(pluginConfig, mtprotoClient);
     case "delete_scheduled":
@@ -399,22 +404,62 @@ async function executeGetHistory(
 async function executeSchedulePost(
   params: ToolParams,
   pluginConfig: TelegramAdminChannelConfig,
+  api: OpenClawPluginApi,
   mtprotoClient?: MtprotoClient,
 ) {
   const err = requireMtproto(mtprotoClient);
   if (err) return err;
 
-  if (!params.text) {
-    return jsonResult({ error: "'text' parameter is required for 'schedule_post'" });
+  const hasMedia = !!(
+    (params.photoFileIds && params.photoFileIds.length > 0) ||
+    (params.photoPaths && params.photoPaths.length > 0)
+  );
+  if (!hasMedia && !params.text) {
+    return jsonResult({ error: "'text', 'photoFileIds', or 'photoPaths' is required for 'schedule_post'" });
   }
   if (!params.scheduleDate) {
     return jsonResult({ error: "'scheduleDate' (unix timestamp UTC) is required for 'schedule_post'" });
   }
 
   try {
+    if (hasMedia) {
+      type MediaSource = Parameters<MtprotoClient["scheduleMediaPost"]>[1][number];
+      const sources: MediaSource[] = [];
+
+      if (params.photoPaths && params.photoPaths.length > 0) {
+        for (const p of params.photoPaths) {
+          const buffer = await readFile(p);
+          sources.push({ type: "localFile", buffer, fileName: basename(p) });
+        }
+      }
+      if (params.photoFileIds && params.photoFileIds.length > 0) {
+        const botToken = resolveBotToken(api.config, pluginConfig.telegramAccountId);
+        for (const fid of params.photoFileIds) {
+          sources.push({ type: "fileId", botToken, fileId: fid });
+        }
+      }
+
+      const result = await mtprotoClient!.scheduleMediaPost(
+        pluginConfig.channel.chatId,
+        sources,
+        {
+          caption: params.text,
+          scheduleDate: params.scheduleDate,
+          silent: params.silent,
+        },
+      );
+      return jsonResult({
+        ok: true,
+        messageIds: result.messageIds,
+        scheduleDate: result.scheduleDate,
+        scheduledFor: new Date(result.scheduleDate * 1000).toISOString(),
+        type: sources.length > 1 ? "album" : "photo",
+      });
+    }
+
     const result = await mtprotoClient!.scheduleMessage(
       pluginConfig.channel.chatId,
-      params.text,
+      params.text!,
       params.scheduleDate,
       { silent: params.silent },
     );

@@ -332,55 +332,70 @@ export class MtprotoClient {
 
   async scheduleMediaPost(
     peer: string,
-    botToken: string,
-    fileId: string,
+    sources: Array<
+      | { type: "fileId"; botToken: string; fileId: string }
+      | { type: "localFile"; buffer: Buffer; fileName: string }
+    >,
     opts: { caption?: string; scheduleDate: number; silent?: boolean },
-  ): Promise<{ messageId: number; scheduleDate: number }> {
+  ): Promise<{ messageIds: number[]; scheduleDate: number }> {
     const client = await this.ensureConnected();
 
-    // 1. Get file path via Bot API
-    const getFileUrl = `https://api.telegram.org/bot${botToken}/getFile?file_id=${encodeURIComponent(fileId)}`;
-    const getFileResp = await fetch(getFileUrl);
-    const getFileData = (await getFileResp.json()) as {
-      ok: boolean;
-      result?: { file_path: string; file_size?: number };
-      description?: string;
-    };
-    if (!getFileData.ok || !getFileData.result?.file_path) {
-      throw new Error(
-        `Bot API getFile failed: ${getFileData.description ?? "unknown error"}`,
-      );
+    const files: CustomFile[] = [];
+    for (const source of sources) {
+      let buffer: Buffer;
+      let fileName: string;
+
+      if (source.type === "fileId") {
+        const getFileUrl = `https://api.telegram.org/bot${source.botToken}/getFile?file_id=${encodeURIComponent(source.fileId)}`;
+        const getFileResp = await fetch(getFileUrl);
+        const getFileData = (await getFileResp.json()) as {
+          ok: boolean;
+          result?: { file_path: string; file_size?: number };
+          description?: string;
+        };
+        if (!getFileData.ok || !getFileData.result?.file_path) {
+          throw new Error(
+            `Bot API getFile failed for ${source.fileId}: ${getFileData.description ?? "unknown error"}`,
+          );
+        }
+
+        const downloadUrl = `https://api.telegram.org/file/bot${source.botToken}/${getFileData.result.file_path}`;
+        const downloadResp = await fetch(downloadUrl);
+        if (!downloadResp.ok) {
+          throw new Error(
+            `Failed to download file: ${downloadResp.status} ${downloadResp.statusText}`,
+          );
+        }
+        buffer = Buffer.from(await downloadResp.arrayBuffer());
+        fileName = getFileData.result.file_path.split("/").pop() ?? "photo.jpg";
+      } else {
+        buffer = source.buffer;
+        fileName = source.fileName;
+      }
+
+      files.push(new CustomFile(fileName, buffer.length, "", buffer));
     }
 
-    // 2. Download the file binary
-    const downloadUrl = `https://api.telegram.org/file/bot${botToken}/${getFileData.result.file_path}`;
-    const downloadResp = await fetch(downloadUrl);
-    if (!downloadResp.ok) {
-      throw new Error(
-        `Failed to download file: ${downloadResp.status} ${downloadResp.statusText}`,
-      );
-    }
-    const buffer = Buffer.from(await downloadResp.arrayBuffer());
-    const fileName = getFileData.result.file_path.split("/").pop() ?? "photo.jpg";
-
-    // 3. Upload and send via gramjs
     const inputPeer = await client.getInputEntity(peer);
-    const file = new CustomFile(fileName, buffer.length, "", buffer);
 
+    // sendFile accepts an array of files → sends as album
     const result = await client.sendFile(inputPeer, {
-      file,
+      file: files.length === 1 ? files[0] : files,
       caption: opts.caption,
       scheduleDate: opts.scheduleDate,
       silent: opts.silent,
     });
 
-    // 4. Extract messageId
-    let msgId = 0;
-    if (result instanceof Api.Message) {
-      msgId = n(result.id);
+    const messageIds: number[] = [];
+    if (Array.isArray(result)) {
+      for (const msg of result) {
+        if (msg instanceof Api.Message) messageIds.push(n(msg.id));
+      }
+    } else if (result instanceof Api.Message) {
+      messageIds.push(n(result.id));
     }
 
-    return { messageId: msgId, scheduleDate: opts.scheduleDate };
+    return { messageIds, scheduleDate: opts.scheduleDate };
   }
 
   async getScheduledMessages(peer: string): Promise<ScheduledMessage[]> {
