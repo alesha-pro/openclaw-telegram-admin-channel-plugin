@@ -377,7 +377,7 @@ src/
 
 ```bash
 # 1. Clone and build
-git clone <repo-url> && cd openclaw-telegram-admin-channel-plugin
+git clone https://github.com/alesha-pro/openclaw-telegram-admin-channel-plugin.git && cd openclaw-telegram-admin-channel-plugin
 pnpm install && pnpm build
 ```
 
