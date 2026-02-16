@@ -7,6 +7,7 @@ export type StoredPost = {
   text: string;
   timestamp: number;
   permalink?: string;
+  fileId?: string;
 };
 
 export type StoredComment = {
@@ -18,6 +19,7 @@ export type StoredComment = {
   fromName?: string;
   threadId?: number;
   isAutoForward?: boolean;
+  fileId?: string;
 };
 
 // --- generic JSON-file store ---

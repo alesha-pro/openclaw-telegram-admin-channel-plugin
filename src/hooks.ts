@@ -68,6 +68,8 @@ export function registerHooks(
         typeof metadata.is_automatic_forward === "boolean"
           ? metadata.is_automatic_forward
           : false;
+      const fileId =
+        typeof metadata.fileId === "string" ? metadata.fileId : undefined;
 
       if (isAutoForward || isFromChannel) {
         // Channel post (direct or auto-forwarded to discussion)
@@ -77,6 +79,7 @@ export function registerHooks(
             chatId: channelChatId,
             text: event.content,
             timestamp: event.timestamp ?? Date.now(),
+            fileId,
           });
           if (inserted) {
             api.logger.info(
@@ -95,6 +98,7 @@ export function registerHooks(
           fromName: senderName ?? senderUsername,
           threadId,
           isAutoForward: false,
+          fileId,
         });
         api.logger.info(
           `telegram-admin-channel hook: stored comment from ${event.from} in discussion`,

@@ -47,6 +47,9 @@ const ToolParameters = Type.Object({
   scheduleDate: Type.Optional(
     Type.Number({ description: "Unix timestamp (UTC) for schedule_post" }),
   ),
+  photoFileId: Type.Optional(
+    Type.String({ description: "Telegram file_id for photo (from hook)" }),
+  ),
 });
 
 type ToolParams = Static<typeof ToolParameters>;
@@ -70,7 +73,7 @@ const MTPROTO_DESCRIPTION =
   "'get_post_stats' (per-post views/reactions graphs, requires 'messageId'), " +
   "'get_history' (channel message history, optional 'limit' and 'offsetId'). " +
   "Scheduled posts: " +
-  "'schedule_post' (requires 'text' and 'scheduleDate' as unix timestamp UTC), " +
+  "'schedule_post' (text or photo, requires 'scheduleDate' as unix timestamp UTC; optional 'photoFileId' for media, 'text' as caption), " +
   "'list_scheduled' (list all pending scheduled messages), " +
   "'delete_scheduled' (requires 'messageIds'), " +
   "'send_scheduled_now' (publish scheduled messages immediately, requires 'messageIds').";

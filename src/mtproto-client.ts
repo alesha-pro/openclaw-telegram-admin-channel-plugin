@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { TelegramClient, Api } from "telegram";
+import { CustomFile } from "telegram/client/uploads.js";
 import { StringSession } from "telegram/sessions/index.js";
 
 type Logger = {
@@ -327,6 +328,59 @@ export class MtprotoClient {
     }
 
     return { messageId: msgId, scheduleDate };
+  }
+
+  async scheduleMediaPost(
+    peer: string,
+    botToken: string,
+    fileId: string,
+    opts: { caption?: string; scheduleDate: number; silent?: boolean },
+  ): Promise<{ messageId: number; scheduleDate: number }> {
+    const client = await this.ensureConnected();
+
+    // 1. Get file path via Bot API
+    const getFileUrl = `https://api.telegram.org/bot${botToken}/getFile?file_id=${encodeURIComponent(fileId)}`;
+    const getFileResp = await fetch(getFileUrl);
+    const getFileData = (await getFileResp.json()) as {
+      ok: boolean;
+      result?: { file_path: string; file_size?: number };
+      description?: string;
+    };
+    if (!getFileData.ok || !getFileData.result?.file_path) {
+      throw new Error(
+        `Bot API getFile failed: ${getFileData.description ?? "unknown error"}`,
+      );
+    }
+
+    // 2. Download the file binary
+    const downloadUrl = `https://api.telegram.org/file/bot${botToken}/${getFileData.result.file_path}`;
+    const downloadResp = await fetch(downloadUrl);
+    if (!downloadResp.ok) {
+      throw new Error(
+        `Failed to download file: ${downloadResp.status} ${downloadResp.statusText}`,
+      );
+    }
+    const buffer = Buffer.from(await downloadResp.arrayBuffer());
+    const fileName = getFileData.result.file_path.split("/").pop() ?? "photo.jpg";
+
+    // 3. Upload and send via gramjs
+    const inputPeer = await client.getInputEntity(peer);
+    const file = new CustomFile(fileName, buffer.length, "", buffer);
+
+    const result = await client.sendFile(inputPeer, {
+      file,
+      caption: opts.caption,
+      scheduleDate: opts.scheduleDate,
+      silent: opts.silent,
+    });
+
+    // 4. Extract messageId
+    let msgId = 0;
+    if (result instanceof Api.Message) {
+      msgId = n(result.id);
+    }
+
+    return { messageId: msgId, scheduleDate: opts.scheduleDate };
   }
 
   async getScheduledMessages(peer: string): Promise<ScheduledMessage[]> {
