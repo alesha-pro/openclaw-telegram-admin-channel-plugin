@@ -1,6 +1,34 @@
 # Telegram Admin Channel — AI Agent Guide
 
-You have access to Telegram channel management tools. Use these to publish posts, manage scheduled content, view analytics, and administer the channel.
+You have access to Telegram channel management tools. Use these to publish posts, manage scheduled content, view analytics, handle comments, and administer the channel.
+
+## Architecture — How Comments Work
+
+The channel has a linked discussion group. Comments are collected **independently via MTProto polling** (not through bot mentions or hooks). This means:
+
+- **You do NOT receive comments as incoming messages.** They are collected in the background every 5 minutes by the discussion-monitor service.
+- **You do NOT need to be mentioned** to see or respond to comments. All messages in the discussion group are captured automatically.
+- **Auto-reply** processes pending comments automatically — the AI generates responses and sends them to the correct thread.
+- **Manual intervention**: you can review, reply to, or skip specific comments using `tg_channel_manage` actions.
+
+### Comment lifecycle:
+1. Someone writes in the discussion group (comment on a post or general message)
+2. Discussion-monitor picks it up via MTProto polling (every 5 min)
+3. Stored as comment with `status: "pending"` (owner messages have no status)
+4. Notification sent to owner (rate-limited)
+5. Auto-reply processes pending → AI decides to reply or skip
+6. Comment marked as `"replied"` or `"skipped"`
+
+### What you CAN do with comments:
+- `list_pending_comments` — see unprocessed comments waiting for response
+- `reply_comment` — manually reply to a specific comment (overrides auto-reply)
+- `skip_comment` — mark a comment as intentionally skipped
+- `search` with `searchType: "comment"` — find comments by text
+- `list_recent_activity` — see recent posts AND comments together
+
+### What you should NOT do:
+- Don't try to send messages directly to the discussion group — use the comment tools instead.
+- Don't expect to receive comments as incoming messages — they come through background polling.
 
 ## Available Tools
 
@@ -33,6 +61,9 @@ You have access to Telegram channel management tools. Use these to publish posts
 - `status` — Check bot, MTProto, storage status.
 - `list_admins` — List channel admins. MTProto only.
 - `edit_admin` — Edit admin rights. Requires `userId`, `adminRights`. MTProto only. Dangerous action.
+- `list_pending_comments` — Show comments awaiting response. Optional: `limit`.
+- `reply_comment` — Reply to a comment. Requires `messageId`, `replyText`. Optional: `chatId`.
+- `skip_comment` — Mark comment as skipped. Requires `messageId`. Optional: `chatId`.
 
 ## Workflows
 
@@ -50,6 +81,13 @@ You have access to Telegram channel management tools. Use these to publish posts
 2. Drill into specific posts with `action: "get_post_stats"`.
 3. Use `action: "get_channel_stats"` for subscriber growth data.
 
+### Managing Comments
+1. Check pending: `tg_channel_manage` `action: "list_pending_comments"`.
+2. Review each comment and decide:
+   - Reply: `action: "reply_comment"`, `messageId`, `replyText` — sends reply in the correct thread.
+   - Skip: `action: "skip_comment"`, `messageId` — marks as intentionally ignored.
+3. Auto-reply handles most comments automatically. Use manual actions for special cases.
+
 ### Using Templates
 1. Create: `tg_channel_post` `action: "create_template"` with `templateName` and `text`.
 2. List: `action: "list_templates"`.
@@ -63,23 +101,5 @@ You have access to Telegram channel management tools. Use these to publish posts
 - **parseMode** is NOT supported for scheduled posts via MTProto.
 - **Reactions** (react) are MTProto-only — Bot API does not support them.
 - **Admin management** (list_admins, edit_admin) is MTProto-only and edit_admin is a dangerous action.
-- **Comment notifications** are configured separately in `notifications.onComment` config section.
-
-## Config Requirements
-
-```yaml
-channel:
-  chatId: "@your_channel"  # or -100...
-ownerAllowFrom:
-  - "user_id_1"
-dangerousActions:
-  enabled: true  # for edit/delete/pin operations
-mtproto:
-  enabled: true  # for stats, scheduled posts, reactions, admin management
-  apiId: 12345
-  apiHash: "abc..."
-notifications:
-  onComment:
-    enabled: true
-    notifyChatId: "123456789"  # your personal chat ID
-```
+- **Comments** are polled every 5 minutes — there may be a short delay before new comments appear.
+- **Auto-reply cooldown** prevents replying to the same thread too frequently (default: 30 min per thread).
