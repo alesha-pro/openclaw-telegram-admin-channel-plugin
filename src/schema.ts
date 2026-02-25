@@ -34,6 +34,14 @@ export const TelegramAdminChannelConfigSchema = Type.Object({
       sessionPath: Type.Optional(Type.String()),
     }),
   ),
+  autoReply: Type.Optional(
+    Type.Object({
+      enabled: Type.Optional(Type.Boolean({ default: false })),
+      intervalMinutes: Type.Optional(Type.Number({ default: 10 })),
+      maxRepliesPerBatch: Type.Optional(Type.Number({ default: 5 })),
+      cooldownPerThreadMinutes: Type.Optional(Type.Number({ default: 30 })),
+    }),
+  ),
   notifications: Type.Optional(
     Type.Object({
       onComment: Type.Optional(

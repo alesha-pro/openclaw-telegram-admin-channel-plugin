@@ -10,6 +10,7 @@ import { createStatsToolFactory } from "./tool-stats.js";
 import { createScheduleToolFactory } from "./tool-schedule.js";
 import { createManageToolFactory } from "./tool-manage.js";
 import { registerHooks } from "./hooks.js";
+import { startAutoReplyService } from "./auto-reply.js";
 import { MtprotoClient } from "./mtproto-client.js";
 import { resolveBotToken } from "./telegram-api.js";
 
@@ -76,6 +77,25 @@ const plugin = {
 
     // Register hooks
     registerHooks(api, pluginConfig, posts, comments);
+
+    // Register auto-reply background service
+    if (pluginConfig?.autoReply?.enabled) {
+      const stopAutoReply = startAutoReplyService(
+        api,
+        pluginConfig,
+        comments,
+        posts,
+      );
+      api.registerService({
+        id: "telegram-admin-auto-reply",
+        async start(ctx) {
+          ctx.logger.info("telegram-admin-auto-reply service started");
+        },
+        async stop() {
+          stopAutoReply();
+        },
+      });
+    }
 
     // U1/P7: Register MTProto as a background service for clean lifecycle
     if (mtprotoClient) {

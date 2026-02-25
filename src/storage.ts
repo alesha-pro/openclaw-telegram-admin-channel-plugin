@@ -29,6 +29,9 @@ export type StoredComment = {
   threadId?: number;
   isAutoForward?: boolean;
   fileId?: string;
+  status?: "pending" | "replied" | "skipped";
+  replyMessageId?: number;
+  repliedAt?: number;
 };
 
 const DEFAULT_LOCK_OPTIONS: FileLockOptions = {
@@ -170,6 +173,51 @@ export class CommentStorage extends JsonFileStore<StoredComment> {
     const matches = this.getItems().filter((c) => c.text.toLowerCase().includes(q));
     const limit = opts?.limit ?? 20;
     return matches.slice(-limit);
+  }
+
+  async getPending(limit?: number): Promise<StoredComment[]> {
+    await this.ensureLoaded();
+    const pending = this.getItems().filter((c) => c.status === "pending");
+    if (limit && limit > 0) return pending.slice(0, limit);
+    return pending;
+  }
+
+  async markReplied(
+    messageId: number,
+    chatId: string,
+    replyData: { replyMessageId: number },
+  ): Promise<boolean> {
+    await this.ensureLoaded();
+    const item = this.getItems().find(
+      (c) => c.messageId === messageId && c.chatId === chatId,
+    );
+    if (!item) return false;
+    item.status = "replied";
+    item.replyMessageId = replyData.replyMessageId;
+    item.repliedAt = Date.now();
+    await this.save();
+    return true;
+  }
+
+  async markSkipped(messageId: number, chatId: string): Promise<boolean> {
+    await this.ensureLoaded();
+    const item = this.getItems().find(
+      (c) => c.messageId === messageId && c.chatId === chatId,
+    );
+    if (!item) return false;
+    item.status = "skipped";
+    await this.save();
+    return true;
+  }
+
+  async getByMessageId(
+    messageId: number,
+    chatId: string,
+  ): Promise<StoredComment | undefined> {
+    await this.ensureLoaded();
+    return this.getItems().find(
+      (c) => c.messageId === messageId && c.chatId === chatId,
+    );
   }
 }
 

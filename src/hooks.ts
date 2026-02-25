@@ -105,6 +105,14 @@ export function registerHooks(
         const senderId =
           typeof metadata.senderId === "string" ? metadata.senderId : event.from;
 
+        // Determine if auto-reply should be considered for this comment.
+        // Skip bot's own messages and owner messages.
+        const ownerIds = new Set(pluginConfig.ownerAllowFrom ?? []);
+        const isBotMessage = senderId === pluginConfig.channel.chatId;
+        const isOwner = ownerIds.has(senderId);
+        const commentStatus: "pending" | undefined =
+          !isBotMessage && !isOwner ? "pending" : undefined;
+
         await comments.add({
           messageId,
           chatId: conversationId,
@@ -115,6 +123,7 @@ export function registerHooks(
           threadId,
           isAutoForward: false,
           fileId,
+          ...(commentStatus ? { status: commentStatus } : {}),
         });
         api.logger.info(
           `telegram-admin-channel hook: stored comment from ${event.from} in discussion`,

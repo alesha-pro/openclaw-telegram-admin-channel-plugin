@@ -16,9 +16,9 @@ import {
 } from "./tool-shared.js";
 
 const ManageToolParams = Type.Object({
-  action: Type.Unsafe<"pin_post" | "unpin_post" | "react" | "search" | "status" | "list_admins" | "edit_admin">({
+  action: Type.Unsafe<"pin_post" | "unpin_post" | "react" | "search" | "status" | "list_admins" | "edit_admin" | "list_pending_comments" | "reply_comment" | "skip_comment">({
     type: "string",
-    enum: ["pin_post", "unpin_post", "react", "search", "status", "list_admins", "edit_admin"],
+    enum: ["pin_post", "unpin_post", "react", "search", "status", "list_admins", "edit_admin", "list_pending_comments", "reply_comment", "skip_comment"],
     description: "Action to perform",
   }),
   ...SharedParams,
@@ -37,6 +37,12 @@ const ManageToolParams = Type.Object({
   ),
   userId: Type.Optional(
     Type.Union([Type.Number(), Type.String()], { description: "User ID for edit_admin" }),
+  ),
+  replyText: Type.Optional(
+    Type.String({ description: "Text to reply with for reply_comment action" }),
+  ),
+  chatId: Type.Optional(
+    Type.String({ description: "Chat ID for comment operations (defaults to discussion chatId)" }),
   ),
   adminRights: Type.Optional(
     Type.Object({
@@ -65,7 +71,10 @@ const DESCRIPTION =
   "'search' (search posts/comments, requires 'query'), " +
   "'status' (check connection status), " +
   "'list_admins' (list channel administrators, MTProto only), " +
-  "'edit_admin' (edit admin rights, requires 'userId' and 'adminRights', MTProto only).";
+  "'edit_admin' (edit admin rights, requires 'userId' and 'adminRights', MTProto only), " +
+  "'list_pending_comments' (list comments awaiting reply), " +
+  "'reply_comment' (manually reply to a comment, requires 'messageId' and 'replyText'), " +
+  "'skip_comment' (mark comment as skipped, requires 'messageId').";
 
 export function createManageToolFactory(
   api: OpenClawPluginApi,
@@ -103,6 +112,12 @@ export function createManageToolFactory(
           return executeListAdmins(cfg, mtprotoClient);
         case "edit_admin":
           return executeEditAdmin(params, cfg, mtprotoClient);
+        case "list_pending_comments":
+          return executeListPendingComments(params, comments);
+        case "reply_comment":
+          return executeReplyComment(params, cfg, api, comments);
+        case "skip_comment":
+          return executeSkipComment(params, cfg, comments);
         default:
           return jsonResult({ error: `Unknown action: ${String(params.action)}` });
       }
@@ -284,4 +299,100 @@ async function executeEditAdmin(
   } catch (e) {
     return jsonResult({ error: `MTProto error: ${e instanceof Error ? e.message : String(e)}` });
   }
+}
+
+async function executeListPendingComments(
+  params: Params,
+  comments: CommentStorage,
+) {
+  const limit = params.limit ?? 20;
+  const pending = await comments.getPending(limit);
+  return jsonResult({
+    ok: true,
+    count: pending.length,
+    comments: pending.map((c) => ({
+      messageId: c.messageId,
+      chatId: c.chatId,
+      from: c.from,
+      fromName: c.fromName,
+      text: c.text.slice(0, 300),
+      threadId: c.threadId,
+      timestamp: c.timestamp,
+    })),
+  });
+}
+
+async function executeReplyComment(
+  params: Params,
+  pluginConfig: TelegramAdminChannelConfig,
+  api: OpenClawPluginApi,
+  comments: CommentStorage,
+) {
+  if (params.messageId == null) {
+    return jsonResult({ error: "'messageId' is required for 'reply_comment'" });
+  }
+  if (!params.replyText) {
+    return jsonResult({ error: "'replyText' is required for 'reply_comment'" });
+  }
+
+  const discussionChatId = pluginConfig.discussion?.chatId;
+  if (!discussionChatId) {
+    return jsonResult({ error: "discussion.chatId not configured" });
+  }
+
+  const chatId = params.chatId ?? discussionChatId;
+  const comment = await comments.getByMessageId(params.messageId, chatId);
+  if (!comment) {
+    return jsonResult({ error: `Comment ${params.messageId} not found in chat ${chatId}` });
+  }
+
+  try {
+    const token = resolveBotToken(api.config, pluginConfig.telegramAccountId);
+    const sendResult = await TelegramBotApi.sendMessage(
+      token,
+      discussionChatId,
+      params.replyText,
+      {
+        replyToMessageId: params.messageId,
+        messageThreadId: comment.threadId,
+      },
+    );
+
+    const replyMsgId = sendResult.result?.message_id ?? 0;
+    await comments.markReplied(params.messageId, chatId, {
+      replyMessageId: replyMsgId,
+    });
+
+    return jsonResult({
+      ok: true,
+      messageId: params.messageId,
+      replyMessageId: replyMsgId,
+      action: "replied",
+    });
+  } catch (e) {
+    return jsonResult({ error: `Telegram API error: ${e instanceof Error ? e.message : String(e)}` });
+  }
+}
+
+async function executeSkipComment(
+  params: Params,
+  pluginConfig: TelegramAdminChannelConfig,
+  comments: CommentStorage,
+) {
+  if (params.messageId == null) {
+    return jsonResult({ error: "'messageId' is required for 'skip_comment'" });
+  }
+
+  const discussionChatId = pluginConfig.discussion?.chatId;
+  if (!discussionChatId) {
+    return jsonResult({ error: "discussion.chatId not configured" });
+  }
+
+  const chatId = params.chatId ?? discussionChatId;
+  const found = await comments.markSkipped(params.messageId, chatId);
+  if (!found) {
+    return jsonResult({ error: `Comment ${params.messageId} not found in chat ${chatId}` });
+  }
+
+  return jsonResult({ ok: true, messageId: params.messageId, action: "skipped" });
 }

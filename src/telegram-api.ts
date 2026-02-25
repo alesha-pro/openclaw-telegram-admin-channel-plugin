@@ -23,6 +23,8 @@ export type SendMessageOptions = {
   parseMode?: "HTML" | "Markdown" | "MarkdownV2";
   disableNotification?: boolean;
   replyMarkup?: Record<string, unknown>;
+  replyToMessageId?: number;
+  messageThreadId?: number;
 };
 
 export type TelegramApiResult = {
@@ -88,6 +90,8 @@ export class TelegramBotApi {
     if (opts?.parseMode) body.parse_mode = opts.parseMode;
     if (opts?.disableNotification) body.disable_notification = true;
     if (opts?.replyMarkup) body.reply_markup = opts.replyMarkup;
+    if (opts?.replyToMessageId) body.reply_to_message_id = opts.replyToMessageId;
+    if (opts?.messageThreadId) body.message_thread_id = opts.messageThreadId;
 
     return callBotApi(token, "sendMessage", body);
   }
