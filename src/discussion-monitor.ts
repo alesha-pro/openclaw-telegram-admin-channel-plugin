@@ -7,6 +7,31 @@ import type { CommentStorage, PostStorage, StoredComment } from "./storage.js";
 import type { MtprotoClient } from "./mtproto-client.js";
 import { resolveBotToken, TelegramBotApi } from "./telegram-api.js";
 
+/** Convert LLM markdown output to Telegram HTML */
+function toTelegramHtml(text: string): string {
+  let html = text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+
+  // Code blocks: ```lang\ncode\n``` → <pre>code</pre>
+  html = html.replace(/```(?:\w*\n)?([\s\S]*?)```/g, (_m, code: string) => `<pre>${code.trim()}</pre>`);
+
+  // Inline code: `code` → <code>code</code>
+  html = html.replace(/`([^`\n]+)`/g, "<code>$1</code>");
+
+  // Bold: **text** → <b>text</b>
+  html = html.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
+
+  // Italic: *text* (not inside bold)
+  html = html.replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, "<i>$1</i>");
+
+  // Strikethrough: ~~text~~ → <s>text</s>
+  html = html.replace(/~~(.+?)~~/g, "<s>$1</s>");
+
+  return html;
+}
+
 type PluginLogger = {
   debug?: (message: string) => void;
   info: (message: string) => void;
@@ -195,10 +220,11 @@ export function startDiscussionMonitor(
       // Skip empty text
       if (!msg.text) continue;
 
-      // Determine status: owner messages get no status, others get "pending"
-      const isOwner = msg.fromId ? ownerIds.has(String(msg.fromId)) : false;
-      const status: "pending" | undefined = isOwner ? undefined : "pending";
+      // Skip messages that are not replies to channel posts (no threadId = general group chat)
+      const threadId = msg.replyToTopId ?? msg.replyToMsgId;
+      if (!threadId) continue;
 
+      // All comments get "pending" so the agent processes them (including owner)
       const inserted = await comments.upsertComment({
         messageId: msg.id,
         chatId: discussionChatId,
@@ -207,14 +233,15 @@ export function startDiscussionMonitor(
         from: String(msg.fromId ?? "unknown"),
         fromName: msg.fromName ?? msg.fromUsername,
         threadId: msg.replyToTopId ?? msg.replyToMsgId,
-        ...(status ? { status } : {}),
+        status: "pending",
       });
 
       if (inserted) {
         newCount++;
 
-        // Send notification for new comments
-        if (notifyEnabled && status === "pending") {
+        // Send notification for new non-owner comments
+        const isOwner = msg.fromId ? ownerIds.has(String(msg.fromId)) : false;
+        if (notifyEnabled && !isOwner) {
           const now = Date.now();
           if (now - lastNotifyTs >= minNotifyIntervalMs) {
             lastNotifyTs = now;
@@ -311,15 +338,30 @@ export function startDiscussionMonitor(
         });
 
         if (replyText) {
-          const sendResult = await TelegramBotApi.sendMessage(
-            token,
-            discussionChatId,
-            replyText,
-            {
-              replyToMessageId: comment.messageId,
-              messageThreadId: comment.threadId,
-            },
-          );
+          let sendResult;
+          try {
+            sendResult = await TelegramBotApi.sendMessage(
+              token,
+              discussionChatId,
+              toTelegramHtml(replyText),
+              {
+                parseMode: "HTML",
+                replyToMessageId: comment.messageId,
+                messageThreadId: comment.threadId,
+              },
+            );
+          } catch {
+            // Fallback: send as plain text if HTML parsing fails
+            sendResult = await TelegramBotApi.sendMessage(
+              token,
+              discussionChatId,
+              replyText,
+              {
+                replyToMessageId: comment.messageId,
+                messageThreadId: comment.threadId,
+              },
+            );
+          }
 
           await comments.markReplied(comment.messageId, comment.chatId, {
             replyMessageId: sendResult.result?.message_id ?? 0,
@@ -450,15 +492,29 @@ export function startDiscussionMonitor(
     }
 
     try {
-      const sendResult = await TelegramBotApi.sendMessage(
-        token,
-        discussionChatId,
-        replyText,
-        {
-          replyToMessageId: comment.messageId,
-          messageThreadId: comment.threadId,
-        },
-      );
+      let sendResult;
+      try {
+        sendResult = await TelegramBotApi.sendMessage(
+          token,
+          discussionChatId,
+          toTelegramHtml(replyText),
+          {
+            parseMode: "HTML",
+            replyToMessageId: comment.messageId,
+            messageThreadId: comment.threadId,
+          },
+        );
+      } catch {
+        sendResult = await TelegramBotApi.sendMessage(
+          token,
+          discussionChatId,
+          replyText,
+          {
+            replyToMessageId: comment.messageId,
+            messageThreadId: comment.threadId,
+          },
+        );
+      }
 
       const replyMsgId = sendResult.result?.message_id;
       await comments.markReplied(comment.messageId, comment.chatId, {

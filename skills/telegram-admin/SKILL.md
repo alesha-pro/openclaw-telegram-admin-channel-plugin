@@ -25,9 +25,9 @@ Agent mode requires:
 - `gateway.http.endpoints.chatCompletions.enabled: true` in server config
 
 ### Comment lifecycle:
-1. Someone writes in the discussion group (comment on a post or general message)
+1. Someone replies to a channel post in the discussion group (only threaded comments are processed — general group messages are ignored)
 2. Discussion-monitor picks it up via MTProto polling (every 5 min)
-3. Stored as comment with `status: "pending"` (owner messages have no status)
+3. Stored as comment with `status: "pending"`
 4. Notification sent to owner (rate-limited)
 5. Auto-reply processes pending:
    - **Simple mode**: one-shot AI call → reply or skip

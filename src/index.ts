@@ -14,6 +14,9 @@ import { startDiscussionMonitor } from "./discussion-monitor.js";
 import { MtprotoClient } from "./mtproto-client.js";
 import { resolveBotToken } from "./telegram-api.js";
 
+// Guard: discussion monitor must only start once even if register() is called per-agent
+let discussionMonitorStarted = false;
+
 const plugin = {
   id: "telegram-admin-channel",
   name: "Telegram Admin Channel",
@@ -79,7 +82,9 @@ const plugin = {
     registerHooks(api, pluginConfig, posts);
 
     // Register discussion monitor (MTProto-based comment polling + auto-reply)
-    if (pluginConfig?.discussion?.chatId && mtprotoClient) {
+    // Guard prevents duplicate monitors when register() is called per-agent
+    if (pluginConfig?.discussion?.chatId && mtprotoClient && !discussionMonitorStarted) {
+      discussionMonitorStarted = true;
       const stopMonitor = startDiscussionMonitor(
         api,
         pluginConfig,

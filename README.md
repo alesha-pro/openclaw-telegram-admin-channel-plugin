@@ -307,8 +307,8 @@ Plugin owns:   discussion group (via MTProto)
 ```
 Every N minutes (default: 5):
   1. MTProto polls discussion group history (getHistory with minId tracking)
-  2. Filters: skip auto-forwarded posts, skip bot's own messages
-  3. Stores new messages as comments (upsertComment with dedup)
+  2. Filters: skip auto-forwarded posts, skip bot's own messages, skip non-threaded messages (only replies to channel posts)
+  3. Stores new comments (upsertComment with dedup)
   4. Sends notification to owner (rate-limited)
   5. If autoReply enabled: processes pending comments through AI
      → AI generates reply → sent via Bot API to correct thread
@@ -318,9 +318,9 @@ Every N minutes (default: 5):
 ### Comment Lifecycle
 
 ```
-New message in discussion group
+New comment on a channel post (reply in discussion thread)
   → discussion-monitor picks up via MTProto
-  → stored with status: "pending" (owner messages: no status)
+  → stored with status: "pending"
   → auto-reply processes:
       → AI reply generated → status: "replied" (replyMessageId saved)
       → AI returns nothing → status: "skipped"
@@ -561,7 +561,7 @@ Plugin (src/index.ts)
 │                                                                 │
 │ Meanwhile, every 5 min:                                         │
 │ discussion-monitor → MTProto getHistory(minId) → new messages   │
-│   → filter (skip forwards, skip bot, skip empty)                │
+│   → filter (skip forwards, skip bot, skip empty, skip non-thread)│
 │   → comments.upsertComment() (dedup by messageId)               │
 │   → notify owner (rate-limited)                                 │
 │   → auto-reply (simple or agent mode):                          │
