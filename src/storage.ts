@@ -210,6 +210,18 @@ export class CommentStorage extends JsonFileStore<StoredComment> {
     return true;
   }
 
+  async upsertComment(comment: StoredComment): Promise<boolean> {
+    await this.ensureLoaded();
+    const items = this.getItems();
+    const exists = items.some(
+      (c) => c.messageId === comment.messageId && c.chatId === comment.chatId,
+    );
+    if (exists) return false;
+    items.push(comment);
+    await this.save();
+    return true;
+  }
+
   async getByMessageId(
     messageId: number,
     chatId: string,

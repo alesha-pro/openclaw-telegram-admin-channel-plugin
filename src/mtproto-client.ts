@@ -77,11 +77,22 @@ export type HistoryMessage = {
   forwards?: number;
   editDate?: number;
   reactions?: { emoji: string; count: number }[];
+  fromId?: number;
+  fromName?: string;
+  fromUsername?: string;
+  replyToMsgId?: number;
+  replyToTopId?: number;
+  isForward?: boolean;
 };
 
 function n(val: unknown): number {
   if (typeof val === "bigint") return Number(val);
   if (typeof val === "number") return val;
+  // GramJS may wrap IDs in custom objects with valueOf()
+  if (val != null) {
+    const num = Number(val);
+    if (Number.isFinite(num)) return num;
+  }
   return 0;
 }
 
@@ -366,7 +377,7 @@ export class MtprotoClient {
 
   async getHistory(
     peer: string,
-    opts?: { limit?: number; offsetId?: number },
+    opts?: { limit?: number; offsetId?: number; minId?: number },
   ): Promise<HistoryMessage[]> {
     const client = await this.ensureConnected();
     const inputPeer = await client.getInputEntity(peer);
@@ -379,7 +390,7 @@ export class MtprotoClient {
         offsetDate: 0,
         addOffset: 0,
         maxId: 0,
-        minId: 0,
+        minId: opts?.minId ?? 0,
         hash: 0 as unknown as Api.long,
       }),
     );
@@ -390,6 +401,16 @@ export class MtprotoClient {
       !(result instanceof Api.messages.ChannelMessages)
     ) {
       return [];
+    }
+
+    // Build user map for resolving sender info
+    const userMap = new Map<number, Api.User>();
+    if (result.users) {
+      for (const u of result.users) {
+        if (u instanceof Api.User) {
+          userMap.set(n(u.id), u);
+        }
+      }
     }
 
     return result.messages
@@ -408,6 +429,33 @@ export class MtprotoClient {
           }
         }
 
+        // Resolve sender
+        let fromId: number | undefined;
+        let fromName: string | undefined;
+        let fromUsername: string | undefined;
+        if (msg.fromId instanceof Api.PeerUser) {
+          fromId = n(msg.fromId.userId);
+          const user = userMap.get(fromId);
+          if (user) {
+            const parts = [user.firstName, user.lastName].filter(Boolean);
+            fromName = parts.join(" ") || undefined;
+            fromUsername = user.username ?? undefined;
+          }
+        } else if (msg.fromId instanceof Api.PeerChannel) {
+          fromId = n(msg.fromId.channelId);
+        }
+
+        // Resolve reply
+        let replyToMsgId: number | undefined;
+        let replyToTopId: number | undefined;
+        if (msg.replyTo instanceof Api.MessageReplyHeader) {
+          replyToMsgId = msg.replyTo.replyToMsgId != null ? n(msg.replyTo.replyToMsgId) : undefined;
+          replyToTopId = msg.replyTo.replyToTopId != null ? n(msg.replyTo.replyToTopId) : undefined;
+        }
+
+        // Detect forward
+        const isForward = !!msg.fwdFrom;
+
         return {
           id: n(msg.id),
           date: n(msg.date),
@@ -416,6 +464,12 @@ export class MtprotoClient {
           forwards: msg.forwards != null ? n(msg.forwards) : undefined,
           editDate: msg.editDate != null ? n(msg.editDate) : undefined,
           reactions: reactions.length > 0 ? reactions : undefined,
+          fromId,
+          fromName,
+          fromUsername,
+          replyToMsgId,
+          replyToTopId,
+          isForward,
         };
       });
   }

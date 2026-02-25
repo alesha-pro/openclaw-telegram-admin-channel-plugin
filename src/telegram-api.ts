@@ -77,6 +77,22 @@ async function callBotApi(
 }
 
 export class TelegramBotApi {
+  static async getMe(
+    token: string,
+  ): Promise<{ id: number; is_bot: boolean; username?: string }> {
+    const url = `${TELEGRAM_API_BASE}/bot${token}/getMe`;
+    const response = await fetch(url);
+    const data = (await response.json()) as {
+      ok: boolean;
+      result?: { id: number; is_bot: boolean; username?: string };
+      description?: string;
+    };
+    if (!data.ok || !data.result) {
+      throw new Error(`getMe failed: ${data.description ?? "unknown error"}`);
+    }
+    return data.result;
+  }
+
   static async sendMessage(
     token: string,
     chatId: string,
