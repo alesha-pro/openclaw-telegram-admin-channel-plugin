@@ -1,21 +1,16 @@
 <div align="center">
 
-# 📡 Telegram Admin Channel Plugin for OpenClaw
+# Telegram Admin Channel Plugin for OpenClaw
 
 **Turn your OpenClaw bot into a full-featured Telegram channel admin**
 
-Publishing · Comments · Analytics · Scheduled Posts · MTProto Power
+Publishing · Editing · Scheduling · Analytics · Templates · Admin Management
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D18-brightgreen.svg)](https://nodejs.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-blue.svg)](https://www.typescriptlang.org/)
 [![pnpm](https://img.shields.io/badge/pnpm-%3E%3D8-orange.svg)](https://pnpm.io/)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](http://makeapullrequest.com)
 [![OpenClaw Plugin](https://img.shields.io/badge/OpenClaw-plugin-blueviolet.svg)](https://github.com/nicepkg/openclaw)
-
-<br />
-
-> *"Why hire a social media manager when you have an AI agent?"* — probably someone, 2026
 
 </div>
 
@@ -23,43 +18,58 @@ Publishing · Comments · Analytics · Scheduled Posts · MTProto Power
 
 ## Table of Contents
 
-- [Features](#-features)
-- [Requirements](#-requirements)
-- [Installation](#-installation)
-- [MTProto Setup (Optional)](#-mtproto-setup-optional)
-- [Usage](#-usage)
-- [How It Works](#-how-it-works)
-- [Development](#-development)
-- [Quick Start (TL;DR)](#-quick-start-tldr)
-- [Contributing](#-contributing)
-- [License](#-license)
+- [Features](#features)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Configuration](#configuration)
+- [MTProto Setup](#mtproto-setup-optional)
+- [Tools](#tools)
+- [Slash Commands & CLI](#slash-commands--cli)
+- [How It Works](#how-it-works)
+- [Development](#development)
+- [Quick Start](#quick-start-tldr)
+- [Contributing](#contributing)
+- [License](#license)
 
 ---
 
-## ✨ Features
+## Features
 
 ### Bot API (always available)
 
 | Feature | Description |
 |---------|-------------|
-| 📝 **Post Publishing** | Publish posts to your channel (HTML, Markdown, MarkdownV2) |
-| 🔄 **Sync** | Synchronize existing posts from a public channel |
-| 💬 **Comments** | Collect and store comments from the discussion group |
-| 📊 **Activity Feed** | View recent activity (posts + comments) |
+| **Post Publishing** | Publish posts to your channel (HTML, Markdown, MarkdownV2) |
+| **Edit / Delete Posts** | Edit published posts or delete them (requires `dangerousActions`) |
+| **Pin / Unpin** | Pin and unpin channel messages |
+| **Forward** | Forward messages to other chats (batch supported) |
+| **Sync** | Synchronize existing posts from a public channel (HTML scraping) |
+| **Comments** | Auto-collect comments from the discussion group |
+| **Comment Notifications** | Throttled notifications on new comments to a configured chat |
+| **Search** | Full-text search across stored posts and comments |
+| **Templates** | Create, list, use, and delete reusable post templates |
+| **Activity Feed** | View recent activity (posts + comments) |
+| **Retry with Backoff** | Automatic retry with exponential backoff + Telegram 429 handling |
+| **File Locking** | Concurrent-safe JSON storage with file locks |
 
 ### MTProto (requires user account authorization)
 
 | Feature | Description |
 |---------|-------------|
-| 👀 **Views & Forwards** | Get view/forward counts for specific messages |
-| 📈 **Channel Stats** | Subscribers, reach, growth, engagement |
-| 📉 **Post Stats** | Per-post statistics with graphs |
-| 📜 **Message History** | Channel message history with reactions |
-| ⏰ **Scheduled Posts** | Create, view, delete, and instantly send scheduled posts |
+| **Views & Forwards** | Get view/forward counts for specific messages |
+| **Channel Stats** | Subscribers, reach, growth, engagement analytics |
+| **Post Stats** | Per-post statistics with view/reaction graphs |
+| **Engagement Dashboard** | Top posts, best posting hours, growth trends |
+| **Message History** | Channel message history with reactions |
+| **Scheduled Posts** | Schedule text, photos, videos, documents (albums supported) |
+| **Manage Scheduled** | List, delete, or instantly send scheduled posts |
+| **Reactions** | Set emoji reactions on messages |
+| **Sync via MTProto** | More reliable sync with fallback to HTML |
+| **Admin Management** | List admins, edit admin rights and ranks |
 
 ---
 
-## 📋 Requirements
+## Requirements
 
 - [OpenClaw](https://github.com/nicepkg/openclaw) >= 2026.2.0
 - Node.js >= 18
@@ -68,9 +78,9 @@ Publishing · Comments · Analytics · Scheduled Posts · MTProto Power
 
 ---
 
-## 🚀 Installation
+## Installation
 
-### 1. Clone and build the plugin
+### 1. Clone and build
 
 ```bash
 git clone https://github.com/alesha-pro/openclaw-telegram-admin-channel-plugin.git
@@ -81,7 +91,7 @@ pnpm build
 
 ### 2. Connect the plugin to OpenClaw
 
-Open your OpenClaw config (`openclaw.json` in your project root or global `~/.openclaw/config.json`) and add the plugin path:
+In your OpenClaw config (`openclaw.json` or `~/.openclaw/config.json`):
 
 ```jsonc
 {
@@ -97,7 +107,7 @@ Open your OpenClaw config (`openclaw.json` in your project root or global `~/.op
 
 ### 3. Configure Telegram account
 
-Make sure your OpenClaw config has the Telegram channel set up with a bot token:
+Make sure your OpenClaw config has a Telegram bot token:
 
 ```jsonc
 {
@@ -109,18 +119,13 @@ Make sure your OpenClaw config has the Telegram channel set up with a bot token:
 }
 ```
 
-If you use multiple accounts, specify the desired one via `telegramAccountId` in the plugin config (defaults to `"default"`).
+If you use multiple accounts, specify via `telegramAccountId` in the plugin config (defaults to `"default"`).
 
 ### 4. Configure the plugin
-
-In the same `openclaw.json`, add a `plugins.entries` section:
 
 ```jsonc
 {
   "plugins": {
-    "load": {
-      "paths": ["/absolute/path/to/openclaw-telegram-admin-channel-plugin"]
-    },
     "entries": {
       "telegram-admin-channel": {
         "enabled": true,
@@ -136,17 +141,41 @@ In the same `openclaw.json`, add a `plugins.entries` section:
 }
 ```
 
-#### Minimum configuration
+### 5. Allow tools in OpenClaw policy
 
-| Field | Type | Required | Description |
-|-------|------|:--------:|-------------|
-| `channel.chatId` | string | ✅ | Channel ID: `@username` or `-100...` |
-| `ownerAllowFrom` | string[] | ✅ | Telegram user IDs with admin rights |
+The plugin registers 5 tools. Allow the ones you need:
 
-#### Full configuration
+```jsonc
+{
+  "tools": {
+    "allow": [
+      "tg_channel_admin",
+      "tg_channel_post",
+      "tg_channel_stats",
+      "tg_channel_schedule",
+      "tg_channel_manage"
+    ]
+  }
+}
+```
+
+`tg_channel_admin` is the legacy monolithic tool (backward compatible). The four specialized tools (`post`, `stats`, `schedule`, `manage`) provide the same functionality split by domain. `stats` and `schedule` are only registered when MTProto is enabled.
+
+---
+
+## Configuration
+
+### Required fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `channel.chatId` | string | Channel ID: `@username` or `-100...` |
+| `ownerAllowFrom` | string[] | Allowed sender IDs (user/agent account IDs) |
+
+### Full configuration
 
 <details>
-<summary>Click to expand full config example</summary>
+<summary>Click to expand</summary>
 
 ```jsonc
 {
@@ -166,7 +195,7 @@ In the same `openclaw.json`, add a `plugins.entries` section:
         "chatId": "-1001234567890"
       },
 
-      // User IDs with admin rights
+      // Allowed sender IDs
       "ownerAllowFrom": ["123456789", "987654321"],
 
       // Default settings
@@ -174,22 +203,31 @@ In the same `openclaw.json`, add a `plugins.entries` section:
         "silent": false                  // send without notification
       },
 
-      // Dangerous actions (delete, edit, pin)
+      // Destructive actions (edit, delete, pin/unpin, edit_admin)
       "dangerousActions": {
         "enabled": false
       },
 
       // Storage
       "storage": {
-        "mode": "json"                   // "json" or "sqlite" (not yet implemented)
+        "mode": "json"
       },
 
-      // MTProto — extended stats and scheduled posts
+      // MTProto — stats, scheduling, reactions, admin management
       "mtproto": {
         "enabled": false,
         "apiId": 12345678,
         "apiHash": "abcdef1234567890abcdef1234567890",
         "sessionPath": "~/.openclaw/plugins/telegram-admin-channel/mtproto.session"
+      },
+
+      // Comment notifications
+      "notifications": {
+        "onComment": {
+          "enabled": false,
+          "notifyChatId": "123456789",   // chat ID to receive notifications
+          "minInterval": 60              // throttle: min seconds between notifications
+        }
       }
     }
   }
@@ -198,49 +236,33 @@ In the same `openclaw.json`, add a `plugins.entries` section:
 
 </details>
 
-### 5. Allow the tool in OpenClaw policy
+### Dangerous actions
 
-The plugin registers an **optional** tool `tg_channel_admin`. To let the agent use it, add it to the tool allowlist:
+Some actions are gated behind `dangerousActions.enabled`:
+`edit_post`, `delete_post`, `pin_post`, `unpin_post`, `delete_scheduled`, `send_scheduled_now`, `edit_admin`.
 
-```jsonc
-{
-  "tools": {
-    "allow": ["tg_channel_admin"]
-  }
-}
-```
+Set `"dangerousActions": { "enabled": true }` to unlock them.
 
 ---
 
-## 🔐 MTProto Setup (Optional)
+## MTProto Setup (Optional)
 
-MTProto provides access to extended statistics and scheduled posts. It requires user account authorization (not a bot).
+MTProto unlocks extended statistics, scheduled posts, reactions, and admin management. It requires a Telegram user account (not a bot).
 
-### 1. Get API ID and API Hash
+### 1. Get API credentials
 
-Go to [my.telegram.org/apps](https://my.telegram.org/apps) and create an application. You will receive an `api_id` and `api_hash`.
+Go to [my.telegram.org/apps](https://my.telegram.org/apps) and create an application to get `api_id` and `api_hash`.
 
-### 2. Run the authorization script
+### 2. Authorize
 
 ```bash
-cd openclaw-telegram-admin-channel-plugin
 pnpm build
 pnpm mtproto:auth
 ```
 
-The script will ask for:
-1. **API ID** — number from my.telegram.org (or env var `TELEGRAM_API_ID`)
-2. **API Hash** — string from my.telegram.org (or env var `TELEGRAM_API_HASH`)
-3. **Session file path** — defaults to `~/.openclaw/plugins/telegram-admin-channel/mtproto.session`
-4. **Phone number** — with country code (e.g., `+15551234567`)
-5. **Verification code** — from Telegram
-6. **2FA password** — if enabled
-
-After successful authorization, the script outputs JSON to paste into your config.
+The script will prompt for your phone number, verification code, and optional 2FA password.
 
 ### 3. Update config
-
-Add to your plugin config:
 
 ```jsonc
 "mtproto": {
@@ -250,7 +272,7 @@ Add to your plugin config:
 }
 ```
 
-Or use environment variables `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` and just specify:
+Or use environment variables `TELEGRAM_API_ID` / `TELEGRAM_API_HASH`:
 
 ```jsonc
 "mtproto": {
@@ -260,68 +282,127 @@ Or use environment variables `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` and just sp
 
 ---
 
-## 🎮 Usage
+## Tools
 
-Once connected, the OpenClaw agent gets the `tg_channel_admin` tool with the following actions:
+The plugin registers 5 tools. The legacy `tg_channel_admin` contains all actions. The four specialized tools split them by domain.
 
-### Bot API Actions
+### `tg_channel_post` — Post Operations
 
 | Action | Parameters | Description |
 |--------|------------|-------------|
-| `post` | `text`, `parseMode?`, `silent?` | Publish a post to the channel |
-| `sync` | — | Sync posts from a public channel |
+| `post` | `text`, `parseMode?`, `silent?` | Publish a text post |
+| `edit_post` | `messageId`, `text`, `parseMode?` | Edit a published post |
+| `delete_post` | `messageIds` | Delete messages (batch) |
+| `forward_post` | `messageIds`, `toChatId`, `silent?` | Forward messages to another chat |
+| `sync` | — | Sync posts (MTProto preferred, HTML fallback) |
 | `list_recent_activity` | `limit?` | Show recent posts and comments |
+| `create_template` | `templateName`, `text`, `parseMode?` | Create a reusable template |
+| `list_templates` | — | List all templates |
+| `use_template` | `templateId` or `templateName`, `silent?` | Post from a template |
+| `delete_template` | `templateId` | Delete a template |
 
-### MTProto Actions
+### `tg_channel_stats` — Statistics (MTProto)
 
 | Action | Parameters | Description |
 |--------|------------|-------------|
-| `get_views` | `messageIds` | Get views and forwards |
-| `get_channel_stats` | — | Channel stats (subscribers, reach, growth) |
-| `get_post_stats` | `messageId` | Post stats (view and reaction graphs) |
+| `get_views` | `messageIds` | View/forward counts |
+| `get_channel_stats` | — | Subscribers, reach, growth |
+| `get_post_stats` | `messageId` | Per-post stats with graphs |
 | `get_history` | `limit?`, `offsetId?` | Channel message history |
-| `schedule_post` | `text`, `scheduleDate`, `silent?` | Schedule a post (unix timestamp UTC) |
-| `list_scheduled` | — | List scheduled posts |
+| `engagement_dashboard` | `periodDays?`, `limit?` | Top posts, best hours, growth trend |
+
+### `tg_channel_schedule` — Scheduled Posts (MTProto)
+
+| Action | Parameters | Description |
+|--------|------------|-------------|
+| `schedule_post` | `text?`, `scheduleDate`, media params, `silent?` | Schedule text or media post |
+| `list_scheduled` | — | List pending scheduled messages |
 | `delete_scheduled` | `messageIds` | Delete scheduled posts |
-| `send_scheduled_now` | `messageIds` | Immediately publish scheduled posts |
+| `send_scheduled_now` | `messageIds` | Publish scheduled posts immediately |
+
+Media parameters for `schedule_post`: `photoFileIds`, `photoPaths`, `videoFileIds`, `videoPaths`, `documentFileIds`, `documentPaths`. Multiple files = album. `text` becomes the caption.
+
+> Note: `parseMode` is not supported for scheduled posts via MTProto.
+
+### `tg_channel_manage` — Channel Management
+
+| Action | Parameters | Description |
+|--------|------------|-------------|
+| `pin_post` | `messageId`, `silent?` | Pin a message |
+| `unpin_post` | `messageId` | Unpin a message |
+| `react` | `messageId`, `emoji` | Set a reaction (MTProto only) |
+| `search` | `query`, `searchType?`, `limit?` | Search posts/comments (`searchType`: post/comment/all) |
+| `status` | — | Plugin connection status |
+| `list_admins` | — | List channel admins (MTProto only) |
+| `edit_admin` | `userId`, `adminRights` | Edit admin rights (MTProto only) |
 
 ### Chat with the Agent — Examples
 
 ```
 > Publish a post: "Hello, world! This is a test post."
-
+> Edit post #42 to say "Updated text"
+> Pin post #42
 > Show me the recent activity in the channel
-
-> How many views did post #42 get?
-
+> How many views did posts 42, 43, 44 get?
 > What are the channel stats lately?
-
+> Show me an engagement dashboard for the last 30 days
 > Schedule a post "See you soon!" for tomorrow at 10:00 UTC
-
-> Show all scheduled posts
+> Schedule a video post with /path/to/video.mp4 for next Monday
+> Search for "product launch" in channel posts
+> Create a template "weekly-digest" with text "Weekly digest:\n..."
+> Post from the "weekly-digest" template
+> List channel admins
 ```
 
 ---
 
-## 🧠 How It Works
+## Slash Commands & CLI
+
+### Slash Commands
+
+Available in the OpenClaw chat interface (require auth):
+
+| Command | Description |
+|---------|-------------|
+| `/tgstatus` | Bot/MTProto connection status, post/comment counts |
+| `/tgscheduled` | List all pending scheduled posts |
+| `/tgstats` | Channel statistics (subscribers, views, shares, reactions) |
+
+### CLI
+
+```bash
+openclaw telegram-admin auth     # Interactive MTProto authorization guide
+openclaw telegram-admin status   # Posts/comments count, MTProto status
+```
+
+---
+
+## How It Works
 
 ### Architecture
 
 ```
-openclaw.json
-├── channels.telegram.botToken      ← bot token
-└── plugins.entries.telegram-admin-channel
-    └── config                      ← plugin configuration
-        ├── channel.chatId          ← channel ID
-        ├── discussion.chatId       ← discussion group ID
-        └── mtproto.*               ← MTProto settings
-
 Plugin (src/index.ts)
-├── registerTool(tg_channel_admin)  ← tool for the agent
-├── registerHooks(message_received) ← auto-collect posts/comments
-├── PostStorage (JSON)              ← post storage
-├── CommentStorage (JSON)           ← comment storage
-└── MtprotoClient (optional)        ← client for stats
+├── Tools
+│   ├── tg_channel_admin      ← legacy monolithic (backward compat)
+│   ├── tg_channel_post       ← post, edit, delete, forward, sync, templates
+│   ├── tg_channel_stats      ← views, channel/post stats, engagement (MTProto)
+│   ├── tg_channel_schedule   ← schedule, list, delete, send now (MTProto)
+│   └── tg_channel_manage     ← pin, react, search, status, admins
+├── Hooks
+│   └── message_received      ← auto-collect posts/comments + notifications
+├── Service
+│   └── telegram-admin-mtproto ← MTProto lifecycle (connect/disconnect)
+├── Commands
+│   ├── /tgstatus
+│   ├── /tgscheduled
+│   └── /tgstats
+├── CLI
+│   └── telegram-admin auth|status
+└── Storage
+    ├── PostStorage (JSON, max 5000, file-locked)
+    ├── CommentStorage (JSON, max 10000, file-locked)
+    └── TemplateStorage (JSON, file-locked)
 ```
 
 ### Data Storage
@@ -330,54 +411,71 @@ Plugin data is stored in `~/.openclaw/plugins/telegram-admin-channel/`:
 
 | File | Description |
 |------|-------------|
-| `posts.json` | Published and synced posts |
-| `comments.json` | Comments from the discussion group |
+| `posts.json` | Published and synced posts (max 5000, auto-rotated) |
+| `comments.json` | Comments from the discussion group (max 10000, auto-rotated) |
+| `templates.json` | Reusable post templates |
 | `mtproto.session` | MTProto session (if enabled) |
+
+### Retry & Rate Limiting
+
+All Telegram API calls (both Bot API and MTProto) are wrapped in `withRetry()`:
+- Exponential backoff with jitter
+- Automatic handling of Telegram 429 (Too Many Requests) with `retry_after`
+- GramJS `FloodWaitError` support
+- Retries on network errors and 5xx server errors
 
 ### Hooks
 
-The plugin automatically listens to all incoming Telegram messages via the `message_received` event. If a message comes from the configured channel or discussion group — it gets saved locally. This lets the agent see the latest activity context without extra API calls.
+The plugin listens to all incoming Telegram messages via `message_received`. Messages from the configured channel or discussion group are automatically stored. New comments can trigger throttled notifications to a configured chat.
+
+### Authorization
+
+The `ownerAllowFrom` config restricts tool access by sender ID (`agentAccountId` or `sessionKey`). Destructive actions require `dangerousActions.enabled`.
 
 ---
 
-## 🛠️ Development
+## Development
 
 ```bash
-# Dev mode (recompile on changes)
-pnpm dev
-
-# Build
-pnpm build
-
-# Tests
-pnpm test
-pnpm test:watch
-
-# MTProto authorization
-pnpm mtproto:auth
+pnpm dev          # Watch mode (recompile on changes)
+pnpm build        # Build
+pnpm test         # Run tests
+pnpm test:watch   # Watch tests
+pnpm mtproto:auth # MTProto authorization
 ```
 
 ### Project Structure
 
 ```
 src/
-├── index.ts          # Plugin entry point, registration
-├── schema.ts         # TypeBox config schema
-├── tool.ts           # Tool definition and handlers
-├── hooks.ts          # Hooks for incoming messages
-├── storage.ts        # JSON storage for posts and comments
-├── telegram-api.ts   # Bot API wrapper + HTML parser
-├── mtproto-client.ts # MTProto client (stats, scheduling)
-└── mtproto-auth.ts   # MTProto authorization CLI script
+├── index.ts           # Plugin entry: registers tools, hooks, service, commands, CLI
+├── schema.ts          # TypeBox config schema (incl. notifications)
+├── tool.ts            # Legacy monolithic tg_channel_admin (backward compat)
+├── tool-shared.ts     # Shared types, auth/dangerous checks, getConfig()
+├── tool-post.ts       # tg_channel_post (post, edit, delete, forward, sync, templates)
+├── tool-stats.ts      # tg_channel_stats (views, channel/post stats, engagement)
+├── tool-schedule.ts   # tg_channel_schedule (schedule, list, delete, send now)
+├── tool-manage.ts     # tg_channel_manage (pin, react, search, status, admins)
+├── retry.ts           # withRetry() exponential backoff + Telegram 429 handling
+├── storage.ts         # JSON file storage with file locking and auto-rotation
+├── hooks.ts           # message_received hook + comment notifications
+├── telegram-api.ts    # Bot API wrapper with retry + HTML channel scraper
+├── mtproto-client.ts  # GramJS MTProto client with retry
+└── mtproto-auth.ts    # MTProto authorization CLI script
+
+skills/
+└── telegram-admin/
+    └── SKILL.md       # AI agent guide for using all tools
 ```
 
 ---
 
-## ⚡ Quick Start (TL;DR)
+## Quick Start (TL;DR)
 
 ```bash
 # 1. Clone and build
-git clone https://github.com/alesha-pro/openclaw-telegram-admin-channel-plugin.git && cd openclaw-telegram-admin-channel-plugin
+git clone https://github.com/alesha-pro/openclaw-telegram-admin-channel-plugin.git
+cd openclaw-telegram-admin-channel-plugin
 pnpm install && pnpm build
 ```
 
@@ -397,43 +495,42 @@ pnpm install && pnpm build
     }
   },
   "tools": {
-    "allow": ["tg_channel_admin"]
+    "allow": [
+      "tg_channel_admin",
+      "tg_channel_post",
+      "tg_channel_manage"
+    ]
   }
 }
 ```
 
-```bash
-# 3. Done! The agent can now manage your channel. 🎉
+```
+// 3. Done! The agent can now manage your channel.
+// Add MTProto for stats, scheduling, reactions, and admin management.
 ```
 
 ---
 
-## 🤝 Contributing
+## Contributing
 
-Contributions are welcome! Here's how you can help:
+Contributions are welcome!
 
-1. **Fork** the repo
-2. **Create** your feature branch (`git checkout -b feature/amazing-feature`)
-3. **Commit** your changes (`git commit -m 'Add amazing feature'`)
-4. **Push** to the branch (`git push origin feature/amazing-feature`)
-5. **Open** a Pull Request
-
-Please make sure to update tests as appropriate.
+1. Fork the repo
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes
+4. Push to the branch
+5. Open a Pull Request
 
 ---
 
-## 📄 License
+## License
 
-[MIT](LICENSE) — do whatever you want, just don't blame us if your channel posts cat memes at 3 AM.
+[MIT](LICENSE)
 
 ---
 
 <div align="center">
 
-**[⬆ Back to Top](#-telegram-admin-channel-plugin-for-openclaw)**
-
-Made with ❤️ and way too much ☕
-
-⭐ Star this repo if you find it useful!
+**[Back to Top](#telegram-admin-channel-plugin-for-openclaw)**
 
 </div>

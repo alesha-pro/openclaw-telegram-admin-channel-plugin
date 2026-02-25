@@ -2,6 +2,7 @@ import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 
 import type { TelegramAdminChannelConfig } from "./schema.js";
 import type { PostStorage, CommentStorage } from "./storage.js";
+import { resolveBotToken, TelegramBotApi } from "./telegram-api.js";
 
 export function registerHooks(
   api: OpenClawPluginApi,
@@ -19,15 +20,18 @@ export function registerHooks(
   const channelChatId = pluginConfig.channel.chatId;
   const discussionChatId = pluginConfig.discussion?.chatId;
 
+  // F10: Comment notification state
+  const notifyCfg = pluginConfig.notifications?.onComment;
+  const notifyEnabled = notifyCfg?.enabled && notifyCfg.notifyChatId;
+  const minIntervalMs = (notifyCfg?.minInterval ?? 60) * 1000;
+  let lastNotifyTs = 0;
+
   api.on(
     "message_received",
     async (event, ctx) => {
-      // DEBUG: log every incoming message_received event
-      api.logger.info(
-        `[tg-admin-debug] message_received: channelId=${ctx.channelId} ` +
-          `conversationId=${ctx.conversationId} from=${event.from} ` +
-          `content=${event.content?.slice(0, 50)} ` +
-          `metadata=${JSON.stringify(event.metadata ?? {})}`,
+      api.logger.debug?.(
+        `message_received: channelId=${ctx.channelId} ` +
+          `conversationId=${ctx.conversationId} from=${event.from}`,
       );
 
       if (ctx.channelId !== "telegram") return;
@@ -88,9 +92,13 @@ export function registerHooks(
           }
         }
       } else if (isFromDiscussion) {
-        // Comment in the discussion group
+        // Comment in the discussion group — skip if no valid messageId
+        if (messageId === undefined) {
+          api.logger.debug?.("skipped comment: no messageId in metadata");
+          return;
+        }
         await comments.add({
-          messageId: messageId ?? 0,
+          messageId,
           chatId: conversationId,
           text: event.content,
           timestamp: event.timestamp ?? Date.now(),
@@ -103,6 +111,25 @@ export function registerHooks(
         api.logger.info(
           `telegram-admin-channel hook: stored comment from ${event.from} in discussion`,
         );
+
+        // F10: Send notification for new comments
+        if (notifyEnabled) {
+          const now = Date.now();
+          if (now - lastNotifyTs >= minIntervalMs) {
+            lastNotifyTs = now;
+            const from = senderName ?? senderUsername ?? event.from;
+            const preview = event.content.slice(0, 200);
+            const notifyText = `New comment from ${from}:\n${preview}`;
+            try {
+              const token = resolveBotToken(api.config, pluginConfig.telegramAccountId);
+              await TelegramBotApi.sendMessage(token, notifyCfg!.notifyChatId, notifyText);
+            } catch (e) {
+              api.logger.warn(
+                `Comment notification failed: ${e instanceof Error ? e.message : String(e)}`,
+              );
+            }
+          }
+        }
       }
     },
     { priority: 50 },

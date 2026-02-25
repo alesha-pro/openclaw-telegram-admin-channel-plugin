@@ -1,5 +1,6 @@
 import { resolveTelegramAccount } from "openclaw/plugin-sdk";
 import type { OpenClawConfig } from "openclaw/plugin-sdk";
+import { withRetry, isTelegramRetryable } from "./retry.js";
 
 export function resolveBotToken(
   config: OpenClawConfig,
@@ -45,6 +46,34 @@ export type ParsedPost = {
 
 const TELEGRAM_API_BASE = "https://api.telegram.org";
 
+async function callBotApi(
+  token: string,
+  method: string,
+  body: Record<string, unknown>,
+): Promise<TelegramApiResult> {
+  return withRetry(
+    async () => {
+      const url = `${TELEGRAM_API_BASE}/bot${token}/${method}`;
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+      const data = (await response.json()) as TelegramApiResult;
+
+      if (!response.ok || !data.ok) {
+        throw new Error(
+          `Telegram API error ${data.error_code ?? response.status}: ${data.description ?? "unknown error"}`,
+        );
+      }
+
+      return data;
+    },
+    { isRetryable: isTelegramRetryable },
+  );
+}
+
 export class TelegramBotApi {
   static async sendMessage(
     token: string,
@@ -60,22 +89,75 @@ export class TelegramBotApi {
     if (opts?.disableNotification) body.disable_notification = true;
     if (opts?.replyMarkup) body.reply_markup = opts.replyMarkup;
 
-    const url = `${TELEGRAM_API_BASE}/bot${token}/sendMessage`;
-    const response = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+    return callBotApi(token, "sendMessage", body);
+  }
+
+  static async editMessageText(
+    token: string,
+    chatId: string,
+    messageId: number,
+    text: string,
+    opts?: { parseMode?: string },
+  ): Promise<TelegramApiResult> {
+    const body: Record<string, unknown> = {
+      chat_id: chatId,
+      message_id: messageId,
+      text,
+    };
+    if (opts?.parseMode) body.parse_mode = opts.parseMode;
+    return callBotApi(token, "editMessageText", body);
+  }
+
+  static async deleteMessage(
+    token: string,
+    chatId: string,
+    messageId: number,
+  ): Promise<TelegramApiResult> {
+    return callBotApi(token, "deleteMessage", {
+      chat_id: chatId,
+      message_id: messageId,
     });
+  }
 
-    const data = (await response.json()) as TelegramApiResult;
+  static async pinChatMessage(
+    token: string,
+    chatId: string,
+    messageId: number,
+    opts?: { disableNotification?: boolean },
+  ): Promise<TelegramApiResult> {
+    const body: Record<string, unknown> = {
+      chat_id: chatId,
+      message_id: messageId,
+    };
+    if (opts?.disableNotification) body.disable_notification = true;
+    return callBotApi(token, "pinChatMessage", body);
+  }
 
-    if (!response.ok || !data.ok) {
-      throw new Error(
-        `Telegram API error ${data.error_code ?? response.status}: ${data.description ?? "unknown error"}`,
-      );
-    }
+  static async unpinChatMessage(
+    token: string,
+    chatId: string,
+    messageId: number,
+  ): Promise<TelegramApiResult> {
+    return callBotApi(token, "unpinChatMessage", {
+      chat_id: chatId,
+      message_id: messageId,
+    });
+  }
 
-    return data;
+  static async forwardMessage(
+    token: string,
+    fromChatId: string,
+    toChatId: string,
+    messageId: number,
+    opts?: { disableNotification?: boolean },
+  ): Promise<TelegramApiResult> {
+    const body: Record<string, unknown> = {
+      chat_id: toChatId,
+      from_chat_id: fromChatId,
+      message_id: messageId,
+    };
+    if (opts?.disableNotification) body.disable_notification = true;
+    return callBotApi(token, "forwardMessage", body);
   }
 }
 
@@ -105,11 +187,7 @@ export async function fetchPublicChannelPosts(
 function parseChannelHtml(html: string, username: string): ParsedPost[] {
   const posts: ParsedPost[] = [];
 
-  // Match each widget message block
-  const messageBlockRe =
-    /class="tgme_widget_message_wrap[^"]*"[^>]*>[\s\S]*?class="tgme_widget_message "[^>]*data-post="([^"]+)"[\s\S]*?<\/div>\s*<\/div>\s*<\/div>/g;
-
-  // Simpler approach: find all data-post attributes and their associated text/date
+  // Find all data-post attributes and their associated text/date
   const postRe = /data-post="([^"]+)"/g;
   const dataPostMatches = [...html.matchAll(postRe)];
 
@@ -161,5 +239,7 @@ function stripHtmlTags(html: string): string {
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
-    .replace(/&nbsp;/g, " ");
+    .replace(/&nbsp;/g, " ")
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCodePoint(parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_, dec) => String.fromCodePoint(parseInt(dec, 10)));
 }

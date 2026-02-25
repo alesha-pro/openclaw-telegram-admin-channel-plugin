@@ -23,9 +23,7 @@ export const TelegramAdminChannelConfigSchema = Type.Object({
   ),
   storage: Type.Optional(
     Type.Object({
-      mode: Type.Optional(
-        Type.Union([Type.Literal("json"), Type.Literal("sqlite")]),
-      ),
+      mode: Type.Optional(Type.Literal("json")),
     }),
   ),
   mtproto: Type.Optional(
@@ -34,6 +32,17 @@ export const TelegramAdminChannelConfigSchema = Type.Object({
       apiId: Type.Number(),
       apiHash: Type.String(),
       sessionPath: Type.Optional(Type.String()),
+    }),
+  ),
+  notifications: Type.Optional(
+    Type.Object({
+      onComment: Type.Optional(
+        Type.Object({
+          enabled: Type.Optional(Type.Boolean({ default: false })),
+          notifyChatId: Type.String({ description: "Chat ID to send notifications to (e.g. owner's personal chat)" }),
+          minInterval: Type.Optional(Type.Number({ description: "Minimum seconds between notifications (default: 60)", default: 60 })),
+        }),
+      ),
     }),
   ),
 });

@@ -1,7 +1,9 @@
+import { randomBytes } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { TelegramClient, Api } from "telegram";
 import { CustomFile } from "telegram/client/uploads.js";
 import { StringSession } from "telegram/sessions/index.js";
+import { withRetry, isTelegramRetryable } from "./retry.js";
 
 type Logger = {
   info: (msg: string) => void;
@@ -45,6 +47,28 @@ export type ScheduledMessage = {
   text: string;
 };
 
+export type AdminInfo = {
+  userId: number;
+  username?: string;
+  firstName?: string;
+  lastName?: string;
+  isCreator: boolean;
+  rights: Record<string, unknown>;
+};
+
+export type AdminRightsInput = {
+  changeInfo?: boolean;
+  postMessages?: boolean;
+  editMessages?: boolean;
+  deleteMessages?: boolean;
+  banUsers?: boolean;
+  inviteUsers?: boolean;
+  pinMessages?: boolean;
+  manageCall?: boolean;
+  addAdmins?: boolean;
+  rank?: string;
+};
+
 export type HistoryMessage = {
   id: number;
   date: number;
@@ -59,6 +83,13 @@ function n(val: unknown): number {
   if (typeof val === "bigint") return Number(val);
   if (typeof val === "number") return val;
   return 0;
+}
+
+function generateRandomId(): Api.long {
+  const buf = randomBytes(8);
+  const hi = buf.readUInt32BE(0);
+  const lo = buf.readUInt32BE(4);
+  return (BigInt(hi) << 32n | BigInt(lo)) as unknown as Api.long;
 }
 
 function resolveInputChannel(
@@ -100,6 +131,85 @@ async function resolveGraph(
     }
   }
   return null;
+}
+
+export type MediaType = "photo" | "video" | "document";
+
+const PHOTO_EXTS = new Set([".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"]);
+const VIDEO_EXTS = new Set([".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v"]);
+
+function detectMediaType(fileName: string): MediaType {
+  const ext = fileName.slice(fileName.lastIndexOf(".")).toLowerCase();
+  if (PHOTO_EXTS.has(ext)) return "photo";
+  if (VIDEO_EXTS.has(ext)) return "video";
+  return "document";
+}
+
+function extractAdminRights(rights: Api.ChatAdminRights): Record<string, boolean> {
+  return {
+    changeInfo: !!rights.changeInfo,
+    postMessages: !!rights.postMessages,
+    editMessages: !!rights.editMessages,
+    deleteMessages: !!rights.deleteMessages,
+    banUsers: !!rights.banUsers,
+    inviteUsers: !!rights.inviteUsers,
+    pinMessages: !!rights.pinMessages,
+    manageCall: !!rights.manageCall,
+    addAdmins: !!rights.addAdmins,
+  };
+}
+
+function redactToken(token: string): string {
+  if (token.length <= 8) return "***";
+  return token.slice(0, 4) + "***" + token.slice(-4);
+}
+
+async function fetchBotFile(
+  botToken: string,
+  fileId: string,
+): Promise<{ buffer: Buffer; fileName: string }> {
+  return withRetry(
+    async () => {
+      const getFileUrl = `https://api.telegram.org/bot${botToken}/getFile?file_id=${encodeURIComponent(fileId)}`;
+      let getFileResp: Response;
+      try {
+        getFileResp = await fetch(getFileUrl);
+      } catch (e) {
+        throw new Error(
+          `Bot API getFile network error for ${fileId}: ${e instanceof Error ? e.message : String(e)}`,
+        );
+      }
+      const getFileData = (await getFileResp.json()) as {
+        ok: boolean;
+        result?: { file_path: string; file_size?: number };
+        description?: string;
+      };
+      if (!getFileData.ok || !getFileData.result?.file_path) {
+        throw new Error(
+          `Bot API getFile failed for ${fileId}: ${getFileData.description ?? "unknown error"}`,
+        );
+      }
+
+      const downloadUrl = `https://api.telegram.org/file/bot${botToken}/${getFileData.result.file_path}`;
+      let downloadResp: Response;
+      try {
+        downloadResp = await fetch(downloadUrl);
+      } catch (e) {
+        throw new Error(
+          `Failed to download file ${fileId} (token: ${redactToken(botToken)}): ${e instanceof Error ? e.message : String(e)}`,
+        );
+      }
+      if (!downloadResp.ok) {
+        throw new Error(
+          `Failed to download file ${fileId}: ${downloadResp.status} ${downloadResp.statusText}`,
+        );
+      }
+      const buffer = Buffer.from(await downloadResp.arrayBuffer());
+      const fileName = getFileData.result.file_path.split("/").pop() ?? "photo.jpg";
+      return { buffer, fileName };
+    },
+    { isRetryable: isTelegramRetryable },
+  );
 }
 
 export class MtprotoClient {
@@ -147,6 +257,18 @@ export class MtprotoClient {
     }
   }
 
+  get isConnected(): boolean {
+    return this.client !== null;
+  }
+
+  private async invoke<R>(request: Api.AnyRequest): Promise<R> {
+    const client = await this.ensureConnected();
+    return withRetry(
+      () => client.invoke(request) as Promise<R>,
+      { isRetryable: isTelegramRetryable },
+    );
+  }
+
   async getViews(
     peer: string,
     messageIds: number[],
@@ -154,7 +276,7 @@ export class MtprotoClient {
     const client = await this.ensureConnected();
     const inputPeer = await client.getInputEntity(peer);
 
-    const result = await client.invoke(
+    const result = await this.invoke<Api.messages.MessageViews>(
       new Api.messages.GetMessagesViews({
         peer: inputPeer,
         id: messageIds,
@@ -174,7 +296,7 @@ export class MtprotoClient {
     const inputPeer = await client.getInputEntity(peer);
     const inputChannel = resolveInputChannel(inputPeer);
 
-    const stats = await client.invoke(
+    const stats = await this.invoke<Api.stats.BroadcastStats>(
       new Api.stats.GetBroadcastStats({
         channel: inputChannel,
       }),
@@ -223,7 +345,7 @@ export class MtprotoClient {
     const inputPeer = await client.getInputEntity(peer);
     const inputChannel = resolveInputChannel(inputPeer);
 
-    const stats = await client.invoke(
+    const stats = await this.invoke<Api.stats.MessageStats>(
       new Api.stats.GetMessageStats({
         channel: inputChannel,
         msgId: messageId,
@@ -249,7 +371,7 @@ export class MtprotoClient {
     const client = await this.ensureConnected();
     const inputPeer = await client.getInputEntity(peer);
 
-    const result = await client.invoke(
+    const result = await this.invoke<Api.messages.TypeMessages>(
       new Api.messages.GetHistory({
         peer: inputPeer,
         limit: opts?.limit ?? 20,
@@ -307,13 +429,13 @@ export class MtprotoClient {
     const client = await this.ensureConnected();
     const inputPeer = await client.getInputEntity(peer);
 
-    const result = await client.invoke(
+    const result = await this.invoke<Api.TypeUpdates>(
       new Api.messages.SendMessage({
         peer: inputPeer,
         message: text,
         scheduleDate,
         silent: opts?.silent,
-        randomId: Math.floor(Math.random() * Number.MAX_SAFE_INTEGER) as unknown as Api.long,
+        randomId: generateRandomId(),
       }),
     );
 
@@ -333,57 +455,43 @@ export class MtprotoClient {
   async scheduleMediaPost(
     peer: string,
     sources: Array<
-      | { type: "fileId"; botToken: string; fileId: string }
-      | { type: "localFile"; buffer: Buffer; fileName: string }
+      | { type: "fileId"; botToken: string; fileId: string; mediaType?: MediaType }
+      | { type: "localFile"; buffer: Buffer; fileName: string; mediaType?: MediaType }
     >,
     opts: { caption?: string; scheduleDate: number; silent?: boolean },
   ): Promise<{ messageIds: number[]; scheduleDate: number }> {
     const client = await this.ensureConnected();
 
     const files: CustomFile[] = [];
+    const forceDocument: boolean[] = [];
     for (const source of sources) {
       let buffer: Buffer;
       let fileName: string;
 
       if (source.type === "fileId") {
-        const getFileUrl = `https://api.telegram.org/bot${source.botToken}/getFile?file_id=${encodeURIComponent(source.fileId)}`;
-        const getFileResp = await fetch(getFileUrl);
-        const getFileData = (await getFileResp.json()) as {
-          ok: boolean;
-          result?: { file_path: string; file_size?: number };
-          description?: string;
-        };
-        if (!getFileData.ok || !getFileData.result?.file_path) {
-          throw new Error(
-            `Bot API getFile failed for ${source.fileId}: ${getFileData.description ?? "unknown error"}`,
-          );
-        }
-
-        const downloadUrl = `https://api.telegram.org/file/bot${source.botToken}/${getFileData.result.file_path}`;
-        const downloadResp = await fetch(downloadUrl);
-        if (!downloadResp.ok) {
-          throw new Error(
-            `Failed to download file: ${downloadResp.status} ${downloadResp.statusText}`,
-          );
-        }
-        buffer = Buffer.from(await downloadResp.arrayBuffer());
-        fileName = getFileData.result.file_path.split("/").pop() ?? "photo.jpg";
+        const downloaded = await fetchBotFile(source.botToken, source.fileId);
+        buffer = downloaded.buffer;
+        fileName = downloaded.fileName;
       } else {
         buffer = source.buffer;
         fileName = source.fileName;
       }
 
       files.push(new CustomFile(fileName, buffer.length, "", buffer));
+      forceDocument.push((source.mediaType ?? detectMediaType(fileName)) === "document");
     }
 
     const inputPeer = await client.getInputEntity(peer);
 
-    // sendFile accepts an array of files → sends as album
+    // For single file, we can set forceDocument directly
+    // For albums, GramJS handles type detection from file extension
+    const isDocument = forceDocument.length === 1 && forceDocument[0];
     const result = await client.sendFile(inputPeer, {
       file: files.length === 1 ? files[0] : files,
       caption: opts.caption,
       scheduleDate: opts.scheduleDate,
       silent: opts.silent,
+      forceDocument: isDocument || undefined,
     });
 
     const messageIds: number[] = [];
@@ -402,7 +510,7 @@ export class MtprotoClient {
     const client = await this.ensureConnected();
     const inputPeer = await client.getInputEntity(peer);
 
-    const result = await client.invoke(
+    const result = await this.invoke<Api.messages.TypeMessages>(
       new Api.messages.GetScheduledHistory({
         peer: inputPeer,
         hash: 0 as unknown as Api.long,
@@ -433,7 +541,7 @@ export class MtprotoClient {
     const client = await this.ensureConnected();
     const inputPeer = await client.getInputEntity(peer);
 
-    await client.invoke(
+    await this.invoke(
       new Api.messages.DeleteScheduledMessages({
         peer: inputPeer,
         id: messageIds,
@@ -448,10 +556,228 @@ export class MtprotoClient {
     const client = await this.ensureConnected();
     const inputPeer = await client.getInputEntity(peer);
 
-    await client.invoke(
+    await this.invoke(
       new Api.messages.SendScheduledMessages({
         peer: inputPeer,
         id: messageIds,
+      }),
+    );
+  }
+
+  // --- F1: Edit message ---
+
+  async editMessage(
+    peer: string,
+    messageId: number,
+    text: string,
+  ): Promise<void> {
+    const client = await this.ensureConnected();
+    const inputPeer = await client.getInputEntity(peer);
+
+    await this.invoke(
+      new Api.messages.EditMessage({
+        peer: inputPeer,
+        id: messageId,
+        message: text,
+      }),
+    );
+  }
+
+  // --- F2: Pin/Unpin ---
+
+  async pinMessage(
+    peer: string,
+    messageId: number,
+    opts?: { silent?: boolean },
+  ): Promise<void> {
+    const client = await this.ensureConnected();
+    const inputPeer = await client.getInputEntity(peer);
+
+    await this.invoke(
+      new Api.messages.UpdatePinnedMessage({
+        peer: inputPeer,
+        id: messageId,
+        silent: opts?.silent,
+      }),
+    );
+  }
+
+  async unpinMessage(
+    peer: string,
+    messageId: number,
+  ): Promise<void> {
+    const client = await this.ensureConnected();
+    const inputPeer = await client.getInputEntity(peer);
+
+    await this.invoke(
+      new Api.messages.UpdatePinnedMessage({
+        peer: inputPeer,
+        id: messageId,
+        unpin: true,
+      }),
+    );
+  }
+
+  // --- F3: Delete messages ---
+
+  async deleteMessages(
+    peer: string,
+    messageIds: number[],
+  ): Promise<void> {
+    const client = await this.ensureConnected();
+    const inputPeer = await client.getInputEntity(peer);
+    const inputChannel = resolveInputChannel(inputPeer);
+
+    await this.invoke(
+      new Api.channels.DeleteMessages({
+        channel: inputChannel,
+        id: messageIds,
+      }),
+    );
+  }
+
+  // --- F4: Forward message ---
+
+  async forwardMessages(
+    fromPeer: string,
+    toPeer: string,
+    messageIds: number[],
+    opts?: { silent?: boolean },
+  ): Promise<number[]> {
+    const client = await this.ensureConnected();
+    const fromInput = await client.getInputEntity(fromPeer);
+    const toInput = await client.getInputEntity(toPeer);
+
+    const randomIds = messageIds.map(() => generateRandomId());
+
+    const result = await this.invoke<Api.TypeUpdates>(
+      new Api.messages.ForwardMessages({
+        fromPeer: fromInput,
+        toPeer: toInput,
+        id: messageIds,
+        randomId: randomIds,
+        silent: opts?.silent,
+      }),
+    );
+
+    const forwarded: number[] = [];
+    if (result instanceof Api.Updates || result instanceof Api.UpdatesCombined) {
+      for (const upd of result.updates) {
+        if (
+          (upd instanceof Api.UpdateNewMessage || upd instanceof Api.UpdateNewChannelMessage) &&
+          upd.message instanceof Api.Message
+        ) {
+          forwarded.push(n(upd.message.id));
+        }
+      }
+    }
+    return forwarded;
+  }
+
+  // --- F8: Send reaction ---
+
+  async sendReaction(
+    peer: string,
+    messageId: number,
+    emoji: string,
+  ): Promise<void> {
+    const client = await this.ensureConnected();
+    const inputPeer = await client.getInputEntity(peer);
+
+    await this.invoke(
+      new Api.messages.SendReaction({
+        peer: inputPeer,
+        msgId: messageId,
+        reaction: [new Api.ReactionEmoji({ emoticon: emoji })],
+      }),
+    );
+  }
+
+  // --- F12: Admin management ---
+
+  async getAdmins(peer: string): Promise<AdminInfo[]> {
+    const client = await this.ensureConnected();
+    const inputPeer = await client.getInputEntity(peer);
+    const inputChannel = resolveInputChannel(inputPeer);
+
+    const result = await this.invoke<Api.channels.ChannelParticipants>(
+      new Api.channels.GetParticipants({
+        channel: inputChannel,
+        filter: new Api.ChannelParticipantsAdmins(),
+        offset: 0,
+        limit: 100,
+        hash: 0 as unknown as Api.long,
+      }),
+    );
+
+    const admins: AdminInfo[] = [];
+
+    if (result.participants) {
+      for (const p of result.participants) {
+        const userId = n(
+          p instanceof Api.ChannelParticipantAdmin
+            ? p.userId
+            : p instanceof Api.ChannelParticipantCreator
+              ? p.userId
+              : 0,
+        );
+        if (!userId) continue;
+
+        const user = result.users?.find(
+          (u) => u instanceof Api.User && n(u.id) === userId,
+        ) as Api.User | undefined;
+
+        const rights =
+          p instanceof Api.ChannelParticipantAdmin
+            ? extractAdminRights(p.adminRights)
+            : p instanceof Api.ChannelParticipantCreator
+              ? { isCreator: true }
+              : {};
+
+        admins.push({
+          userId,
+          username: user?.username ?? undefined,
+          firstName: user?.firstName ?? undefined,
+          lastName: user?.lastName ?? undefined,
+          isCreator: p instanceof Api.ChannelParticipantCreator,
+          rights,
+        });
+      }
+    }
+
+    return admins;
+  }
+
+  async editAdmin(
+    peer: string,
+    userId: number | string,
+    rights: AdminRightsInput,
+  ): Promise<void> {
+    const client = await this.ensureConnected();
+    const inputPeer = await client.getInputEntity(peer);
+    const inputChannel = resolveInputChannel(inputPeer);
+    const userEntity = await client.getInputEntity(
+      typeof userId === "number" ? userId.toString() : userId,
+    );
+
+    const adminRights = new Api.ChatAdminRights({
+      changeInfo: rights.changeInfo,
+      postMessages: rights.postMessages,
+      editMessages: rights.editMessages,
+      deleteMessages: rights.deleteMessages,
+      banUsers: rights.banUsers,
+      inviteUsers: rights.inviteUsers,
+      pinMessages: rights.pinMessages,
+      manageCall: rights.manageCall,
+      addAdmins: rights.addAdmins,
+    });
+
+    await this.invoke(
+      new Api.channels.EditAdmin({
+        channel: inputChannel,
+        userId: userEntity,
+        adminRights,
+        rank: rights.rank ?? "",
       }),
     );
   }

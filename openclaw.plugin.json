@@ -57,7 +57,7 @@
         "properties": {
           "mode": {
             "type": "string",
-            "enum": ["json", "sqlite"],
+            "enum": ["json"],
             "default": "json"
           }
         }
@@ -69,6 +69,19 @@
           "apiId": { "type": "number" },
           "apiHash": { "type": "string" },
           "sessionPath": { "type": "string" }
+        }
+      },
+      "notifications": {
+        "type": "object",
+        "properties": {
+          "onComment": {
+            "type": "object",
+            "properties": {
+              "enabled": { "type": "boolean", "default": false },
+              "notifyChatId": { "type": "string", "description": "Chat ID to send notifications to" },
+              "minInterval": { "type": "number", "default": 60, "description": "Min seconds between notifications" }
+            }
+          }
         }
       }
     },
@@ -106,6 +119,18 @@
     "mtproto.sessionPath": {
       "label": "Session Path",
       "help": "Path to session file (default: ~/.openclaw/plugins/telegram-admin-channel/mtproto.session)"
+    },
+    "notifications.onComment.enabled": {
+      "label": "Comment Notifications",
+      "help": "Send a notification when a new comment is posted"
+    },
+    "notifications.onComment.notifyChatId": {
+      "label": "Notify Chat ID",
+      "help": "Chat ID to send comment notifications to (e.g. your personal chat with the bot)"
+    },
+    "notifications.onComment.minInterval": {
+      "label": "Min Notification Interval (seconds)",
+      "help": "Throttle notifications to avoid spam (default: 60 seconds)"
     }
   }
 }
