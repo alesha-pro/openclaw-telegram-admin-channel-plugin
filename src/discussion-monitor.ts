@@ -290,7 +290,7 @@ export function startDiscussionMonitor(
         }
         userMessage += `Comment from ${fromName}: "${comment.text}"`;
 
-        const sessionKey = `discussion:thread:${threadId}`;
+        const sessionKey = `agent:${agentId}:discussion:thread:${threadId}`;
 
         const replyText = await callAgentApi({
           gatewayUrl,
