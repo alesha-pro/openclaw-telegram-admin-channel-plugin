@@ -225,6 +225,12 @@ The plugin registers 5 tools. Allow the ones you need:
       // Auto-reply to comments (requires discussion.chatId + mtproto)
       "autoReply": {
         "enabled": false,
+        "mode": "simple",                  // "simple" = one-shot AI, "agent" = full agent sessions
+        // Agent mode settings (only used when mode = "agent")
+        "agentId": "discussion-responder", // agent ID from agents.list
+        "gatewayUrl": "http://127.0.0.1:18789",
+        "gatewayToken": "your-gateway-auth-token",
+        // Common settings
         "intervalMinutes": 5,              // polling interval (min 3, default 5)
         "maxRepliesPerBatch": 5,           // max LLM calls per tick
         "cooldownPerThreadMinutes": 30     // don't reply to same thread within this window
@@ -347,11 +353,63 @@ This makes OpenClaw ignore all messages from the discussion group. The plugin ta
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
+| `mode` | `"simple"` | `"simple"` = one-shot AI, `"agent"` = full agent sessions via gateway |
+| `agentId` | `"discussion-responder"` | Agent ID for agent mode (from `agents.list`) |
+| `gatewayUrl` | `"http://127.0.0.1:18789"` | Gateway HTTP URL for agent mode |
+| `gatewayToken` | — | Gateway auth token (required for agent mode) |
 | `intervalMinutes` | 5 | How often to poll for new messages. Min ~3 (MTProto rate limits) |
 | `maxRepliesPerBatch` | 5 | Max LLM calls per tick. Remaining pending wait for next tick |
 | `cooldownPerThreadMinutes` | 30 | After replying in a thread, skip it for this duration |
 
 Most ticks are lightweight (one MTProto call + empty pending check). LLM is only invoked when there are actual pending comments.
+
+### Agent Mode
+
+Agent mode replaces the one-shot `getReplyFromConfig()` with full OpenClaw agent sessions. Each discussion thread gets its own persistent session with tools, history, and agent context.
+
+**How it works:**
+1. Comment arrives via MTProto poll → stored as "pending"
+2. Plugin sends HTTP POST to `{gatewayUrl}/v1/chat/completions` with:
+   - `x-openclaw-agent-id: {agentId}` — routes to a restricted agent
+   - `x-openclaw-session-key: discussion:thread:{threadId}` — per-thread persistence
+3. Gateway runs a full agent turn (tools, session history, IDENTITY.md)
+4. Plugin sends the reply text to Telegram via Bot API
+
+**Server setup for agent mode:**
+
+1. Enable chatCompletions endpoint in `openclaw.json`:
+```jsonc
+{
+  "gateway": {
+    "http": {
+      "endpoints": {
+        "chatCompletions": { "enabled": true }
+      }
+    }
+  }
+}
+```
+
+2. Add a `discussion-responder` agent to `agents.list`:
+```jsonc
+{
+  "agents": {
+    "list": [
+      { "id": "main", "default": true },
+      {
+        "id": "discussion-responder",
+        "workspace": "~/.openclaw/agents/discussion-responder",
+        "tools": {
+          "profile": "minimal",
+          "deny": ["group:runtime", "group:fs", "group:sessions", "group:ui"]
+        }
+      }
+    ]
+  }
+}
+```
+
+3. Create the agent workspace with an IDENTITY.md at `~/.openclaw/agents/discussion-responder/IDENTITY.md`.
 
 ---
 
@@ -506,8 +564,11 @@ Plugin (src/index.ts)
 │   → filter (skip forwards, skip bot, skip empty)                │
 │   → comments.upsertComment() (dedup by messageId)               │
 │   → notify owner (rate-limited)                                 │
-│   → auto-reply: AI generates response → Bot API sendMessage     │
-│     (replyToMessageId + messageThreadId = correct thread)       │
+│   → auto-reply (simple or agent mode):                          │
+│     simple: getReplyFromConfig() → one-shot AI text             │
+│     agent:  HTTP → gateway /v1/chat/completions                 │
+│             (per-thread session, tools, history)                 │
+│   → Bot API sendMessage (replyToMessageId + messageThreadId)    │
 └─────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────┐
@@ -625,6 +686,8 @@ pnpm install && pnpm build
           },
           "autoReply": {
             "enabled": true,
+            "mode": "agent",
+            "gatewayToken": "your-gateway-auth-token",
             "intervalMinutes": 5,
             "maxRepliesPerBatch": 5,
             "cooldownPerThreadMinutes": 30

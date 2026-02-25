@@ -16,7 +16,7 @@ type PluginLogger = {
 
 type ReplyResult = { text?: string };
 
-// Resolve getReplyFromConfig from the gateway's own openclaw module
+// Resolve getReplyFromConfig from the gateway's own openclaw module (simple mode)
 let _getReplyFromConfig:
   | ((ctx: Record<string, unknown>, opts: Record<string, unknown>, config: OpenClawConfig) => Promise<ReplyResult | ReplyResult[] | undefined>)
   | null = null;
@@ -47,6 +47,43 @@ function resolveGetReplyFn(logger: PluginLogger): typeof _getReplyFromConfig {
 
   logger.warn("discussion-monitor: getReplyFromConfig not found in any candidate path");
   return null;
+}
+
+// --- Agent mode: call gateway HTTP /v1/chat/completions ---
+
+async function callAgentApi(params: {
+  gatewayUrl: string;
+  gatewayToken: string;
+  agentId: string;
+  sessionKey: string;
+  userMessage: string;
+  logger: PluginLogger;
+}): Promise<string | null> {
+  const { gatewayUrl, gatewayToken, agentId, sessionKey, userMessage, logger } = params;
+
+  logger.debug?.(`discussion-monitor: calling agent API (agent=${agentId}, session=${sessionKey})`);
+
+  const response = await fetch(`${gatewayUrl}/v1/chat/completions`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${gatewayToken}`,
+      "x-openclaw-agent-id": agentId,
+      "x-openclaw-session-key": sessionKey,
+    },
+    body: JSON.stringify({
+      model: "openclaw",
+      messages: [{ role: "user", content: userMessage }],
+    }),
+    signal: AbortSignal.timeout(120_000), // 2min timeout
+  });
+
+  if (!response.ok) {
+    throw new Error(`Gateway returned ${response.status}: ${await response.text()}`);
+  }
+
+  const data = (await response.json()) as { choices?: { message?: { content?: string } }[] };
+  return data?.choices?.[0]?.message?.content ?? null;
 }
 
 // Track last reply timestamp per thread to enforce cooldown
@@ -101,9 +138,10 @@ export function startDiscussionMonitor(
       );
     })
     .finally(() => {
+      const mode = arCfg?.mode ?? "simple";
       logger.info(
         `discussion-monitor: starting (interval=${arCfg?.intervalMinutes ?? 5}m, ` +
-          `discussion=${discussionChatId}, autoReply=${arCfg?.enabled ? "on" : "off"})`,
+          `discussion=${discussionChatId}, autoReply=${arCfg?.enabled ? "on" : "off"}, mode=${mode})`,
       );
 
       timer = setInterval(() => {
@@ -196,7 +234,114 @@ export function startDiscussionMonitor(
     }
   }
 
+  // --- Dispatch based on mode ---
+
   async function processAutoReplies(): Promise<void> {
+    const mode = arCfg?.mode ?? "simple";
+
+    if (mode === "agent") {
+      await processAutoRepliesAgent();
+    } else {
+      await processAutoRepliesSimple();
+    }
+  }
+
+  // --- Agent mode: full agent sessions via gateway HTTP ---
+
+  async function processAutoRepliesAgent(): Promise<void> {
+    const gatewayUrl = arCfg?.gatewayUrl ?? "http://127.0.0.1:18789";
+    const gatewayToken = arCfg?.gatewayToken;
+    const agentId = arCfg?.agentId ?? "discussion-responder";
+    const maxPerBatch = arCfg?.maxRepliesPerBatch ?? 5;
+    const cooldownMs = (arCfg?.cooldownPerThreadMinutes ?? 30) * 60_000;
+
+    if (!gatewayToken) {
+      logger.warn("discussion-monitor: agent mode requires gatewayToken — skipping");
+      return;
+    }
+
+    const pending = await comments.getPending(maxPerBatch * 2);
+    if (pending.length === 0) return;
+
+    logger.info(`discussion-monitor: processing ${pending.length} pending comment(s) via agent`);
+
+    let processed = 0;
+
+    for (const comment of pending) {
+      if (processed >= maxPerBatch) break;
+
+      // Per-thread cooldown
+      const threadId = comment.threadId ?? comment.messageId;
+      const lastReply = threadLastReply.get(threadId);
+      if (lastReply && Date.now() - lastReply < cooldownMs) {
+        logger.debug?.(
+          `discussion-monitor: skipping comment ${comment.messageId} — thread ${threadId} in cooldown`,
+        );
+        continue;
+      }
+
+      try {
+        const postContext = await findPostContext(posts, comment);
+        const fromName = comment.fromName ?? comment.from;
+
+        let userMessage = "";
+        if (postContext) {
+          userMessage += `[Post: "${postContext.slice(0, 500)}"]\n\n`;
+        }
+        userMessage += `Comment from ${fromName}: "${comment.text}"`;
+
+        const sessionKey = `discussion:thread:${threadId}`;
+
+        const replyText = await callAgentApi({
+          gatewayUrl,
+          gatewayToken,
+          agentId,
+          sessionKey,
+          userMessage,
+          logger,
+        });
+
+        if (replyText) {
+          const sendResult = await TelegramBotApi.sendMessage(
+            token,
+            discussionChatId,
+            replyText,
+            {
+              replyToMessageId: comment.messageId,
+              messageThreadId: comment.threadId,
+            },
+          );
+
+          await comments.markReplied(comment.messageId, comment.chatId, {
+            replyMessageId: sendResult.result?.message_id ?? 0,
+          });
+          threadLastReply.set(threadId, Date.now());
+          logger.info(
+            `discussion-monitor: agent replied to ${comment.messageId} from ${fromName}`,
+          );
+        } else {
+          await comments.markSkipped(comment.messageId, comment.chatId);
+          logger.debug?.(
+            `discussion-monitor: agent returned no reply for ${comment.messageId} — marked skipped`,
+          );
+        }
+
+        processed++;
+      } catch (e) {
+        logger.warn(
+          `discussion-monitor: agent error for ${comment.messageId}: ${e instanceof Error ? e.message : String(e)}`,
+        );
+      }
+    }
+
+    if (processed > 0) {
+      logger.info(`discussion-monitor: agent processed ${processed} comment(s)`);
+    }
+  }
+
+  // --- Simple mode: one-shot getReplyFromConfig (legacy) ---
+
+  async function processAutoRepliesSimple(): Promise<void> {
     const maxPerBatch = arCfg?.maxRepliesPerBatch ?? 5;
     const cooldownMs = (arCfg?.cooldownPerThreadMinutes ?? 30) * 60_000;
 
@@ -228,7 +373,7 @@ export function startDiscussionMonitor(
       }
 
       try {
-        await processOneComment(comment, getReplyFn);
+        await processOneCommentSimple(comment, getReplyFn);
         processed++;
       } catch (e) {
         logger.warn(
@@ -242,7 +387,7 @@ export function startDiscussionMonitor(
     }
   }
 
-  async function processOneComment(
+  async function processOneCommentSimple(
     comment: StoredComment,
     getReplyFn: NonNullable<typeof _getReplyFromConfig>,
   ): Promise<void> {

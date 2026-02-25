@@ -11,12 +11,27 @@ The channel has a linked discussion group. Comments are collected **independentl
 - **Auto-reply** processes pending comments automatically — the AI generates responses and sends them to the correct thread.
 - **Manual intervention**: you can review, reply to, or skip specific comments using `tg_channel_manage` actions.
 
+### Auto-reply modes
+
+The discussion monitor supports two auto-reply modes:
+
+- **`simple`** (default) — one-shot text generation via `getReplyFromConfig()`. No tools, no session memory, no agent capabilities.
+- **`agent`** — full agent sessions via the gateway's HTTP `/v1/chat/completions` endpoint. Each discussion thread gets its own persistent session (`discussion:thread:{threadId}`), with configurable tool restrictions, session history, and full agent context (IDENTITY.md, workspace).
+
+Agent mode requires:
+- `autoReply.mode: "agent"` in plugin config
+- `autoReply.gatewayToken` — gateway auth token
+- A configured agent (default: `discussion-responder`) in `agents.list`
+- `gateway.http.endpoints.chatCompletions.enabled: true` in server config
+
 ### Comment lifecycle:
 1. Someone writes in the discussion group (comment on a post or general message)
 2. Discussion-monitor picks it up via MTProto polling (every 5 min)
 3. Stored as comment with `status: "pending"` (owner messages have no status)
 4. Notification sent to owner (rate-limited)
-5. Auto-reply processes pending → AI decides to reply or skip
+5. Auto-reply processes pending:
+   - **Simple mode**: one-shot AI call → reply or skip
+   - **Agent mode**: gateway agent turn (with tools + session history) → reply or skip
 6. Comment marked as `"replied"` or `"skipped"`
 
 ### What you CAN do with comments:
