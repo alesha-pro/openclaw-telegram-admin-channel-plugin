@@ -144,21 +144,30 @@ export function startDiscussionMonitor(
           `discussion=${discussionChatId}, autoReply=${arCfg?.enabled ? "on" : "off"}, mode=${mode})`,
       );
 
-      timer = setInterval(() => {
-        pollDiscussion().catch((e) => {
-          logger.error(
-            `discussion-monitor tick error: ${e instanceof Error ? e.message : String(e)}`,
-          );
-        });
-      }, intervalMs);
+      // Use setTimeout chain instead of setInterval to prevent overlapping ticks
+      function scheduleTick(): void {
+        timer = setTimeout(async () => {
+          try {
+            await pollDiscussion();
+          } catch (e) {
+            logger.error(
+              `discussion-monitor tick error: ${e instanceof Error ? e.message : String(e)}`,
+            );
+          }
+          scheduleTick();
+        }, intervalMs);
+      }
 
-      // First tick after 15s delay
-      initialTimer = setTimeout(() => {
-        pollDiscussion().catch((e) => {
+      // First tick after 15s delay, then start the chain
+      initialTimer = setTimeout(async () => {
+        try {
+          await pollDiscussion();
+        } catch (e) {
           logger.error(
             `discussion-monitor initial tick error: ${e instanceof Error ? e.message : String(e)}`,
           );
-        });
+        }
+        scheduleTick();
       }, 15_000);
     });
 
@@ -471,7 +480,7 @@ export function startDiscussionMonitor(
   }
 
   return () => {
-    if (timer) clearInterval(timer);
+    if (timer) clearTimeout(timer);
     if (initialTimer) clearTimeout(initialTimer);
     logger.info("discussion-monitor: stopped");
   };
