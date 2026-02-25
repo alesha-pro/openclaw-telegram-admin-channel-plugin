@@ -1,5 +1,5 @@
 {
-  "name": "openclaw-telegram-admin-channel-plugin",
+  "name": "telegram-admin-channel",
   "version": "0.1.0",
   "type": "module",
   "description": "OpenClaw plugin for Telegram channel administration: posts, comments, basic analytics",
