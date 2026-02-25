@@ -13,13 +13,11 @@ import {
 } from "./tool-shared.js";
 
 const StatsToolParams = Type.Object({
-  action: Type.Union([
-    Type.Literal("get_views"),
-    Type.Literal("get_channel_stats"),
-    Type.Literal("get_post_stats"),
-    Type.Literal("get_history"),
-    Type.Literal("engagement_dashboard"),
-  ]),
+  action: Type.Unsafe<"get_views" | "get_channel_stats" | "get_post_stats" | "get_history" | "engagement_dashboard">({
+    type: "string",
+    enum: ["get_views", "get_channel_stats", "get_post_stats", "get_history", "engagement_dashboard"],
+    description: "Action to perform",
+  }),
   ...SharedParams,
   offsetId: Type.Optional(
     Type.Number({ description: "Offset message ID for get_history pagination" }),

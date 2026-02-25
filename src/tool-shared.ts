@@ -24,11 +24,11 @@ export type PluginLogger = {
 export const SharedParams = {
   text: Type.Optional(Type.String({ description: "Post text content" })),
   parseMode: Type.Optional(
-    Type.Union([
-      Type.Literal("HTML"),
-      Type.Literal("Markdown"),
-      Type.Literal("MarkdownV2"),
-    ]),
+    Type.Unsafe<"HTML" | "Markdown" | "MarkdownV2">({
+      type: "string",
+      enum: ["HTML", "Markdown", "MarkdownV2"],
+      description: "Parse mode for text formatting",
+    }),
   ),
   silent: Type.Optional(
     Type.Boolean({ description: "Send without notification" }),
@@ -50,7 +50,9 @@ export function checkAuth(
 ): ToolResult | null {
   if (pluginConfig.ownerAllowFrom && pluginConfig.ownerAllowFrom.length > 0) {
     const senderId = ctx.agentAccountId ?? ctx.sessionKey;
-    if (senderId && !pluginConfig.ownerAllowFrom.includes(senderId)) {
+    // "default" is the gateway fallback when no explicit accountId is configured —
+    // it carries no real identity, so skip the allowlist check in that case.
+    if (senderId && senderId !== "default" && !pluginConfig.ownerAllowFrom.includes(senderId)) {
       return jsonResult({
         error: `Access denied: sender "${senderId}" is not in ownerAllowFrom list.`,
       });

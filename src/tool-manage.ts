@@ -16,15 +16,11 @@ import {
 } from "./tool-shared.js";
 
 const ManageToolParams = Type.Object({
-  action: Type.Union([
-    Type.Literal("pin_post"),
-    Type.Literal("unpin_post"),
-    Type.Literal("react"),
-    Type.Literal("search"),
-    Type.Literal("status"),
-    Type.Literal("list_admins"),
-    Type.Literal("edit_admin"),
-  ]),
+  action: Type.Unsafe<"pin_post" | "unpin_post" | "react" | "search" | "status" | "list_admins" | "edit_admin">({
+    type: "string",
+    enum: ["pin_post", "unpin_post", "react", "search", "status", "list_admins", "edit_admin"],
+    description: "Action to perform",
+  }),
   ...SharedParams,
   emoji: Type.Optional(
     Type.String({ description: "Emoji for react action" }),
@@ -33,11 +29,11 @@ const ManageToolParams = Type.Object({
     Type.String({ description: "Search query for search action" }),
   ),
   searchType: Type.Optional(
-    Type.Union([
-      Type.Literal("post"),
-      Type.Literal("comment"),
-      Type.Literal("all"),
-    ], { description: "Type filter for search (default: all)" }),
+    Type.Unsafe<"post" | "comment" | "all">({
+      type: "string",
+      enum: ["post", "comment", "all"],
+      description: "Type filter for search (default: all)",
+    }),
   ),
   userId: Type.Optional(
     Type.Union([Type.Number(), Type.String()], { description: "User ID for edit_admin" }),

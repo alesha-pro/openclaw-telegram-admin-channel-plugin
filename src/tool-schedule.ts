@@ -17,12 +17,11 @@ import {
 } from "./tool-shared.js";
 
 const ScheduleToolParams = Type.Object({
-  action: Type.Union([
-    Type.Literal("schedule_post"),
-    Type.Literal("list_scheduled"),
-    Type.Literal("delete_scheduled"),
-    Type.Literal("send_scheduled_now"),
-  ]),
+  action: Type.Unsafe<"schedule_post" | "list_scheduled" | "delete_scheduled" | "send_scheduled_now">({
+    type: "string",
+    enum: ["schedule_post", "list_scheduled", "delete_scheduled", "send_scheduled_now"],
+    description: "Action to perform",
+  }),
   ...SharedParams,
   scheduleDate: Type.Optional(
     Type.Number({ description: "Unix timestamp (UTC) for schedule_post" }),

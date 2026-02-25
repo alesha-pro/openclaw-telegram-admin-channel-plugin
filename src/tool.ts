@@ -16,41 +16,18 @@ import type { PostStorage, CommentStorage, TemplateStorage } from "./storage.js"
 import type { MtprotoClient } from "./mtproto-client.js";
 
 const ToolParameters = Type.Object({
-  action: Type.Union([
-    Type.Literal("post"),
-    Type.Literal("sync"),
-    Type.Literal("list_recent_activity"),
-    Type.Literal("get_views"),
-    Type.Literal("get_channel_stats"),
-    Type.Literal("get_post_stats"),
-    Type.Literal("get_history"),
-    Type.Literal("schedule_post"),
-    Type.Literal("list_scheduled"),
-    Type.Literal("delete_scheduled"),
-    Type.Literal("send_scheduled_now"),
-    Type.Literal("edit_post"),
-    Type.Literal("pin_post"),
-    Type.Literal("unpin_post"),
-    Type.Literal("delete_post"),
-    Type.Literal("forward_post"),
-    Type.Literal("react"),
-    Type.Literal("search"),
-    Type.Literal("status"),
-    Type.Literal("engagement_dashboard"),
-    Type.Literal("list_admins"),
-    Type.Literal("edit_admin"),
-    Type.Literal("create_template"),
-    Type.Literal("list_templates"),
-    Type.Literal("use_template"),
-    Type.Literal("delete_template"),
-  ]),
+  action: Type.Unsafe<string>({
+    type: "string",
+    enum: ["post", "sync", "list_recent_activity", "get_views", "get_channel_stats", "get_post_stats", "get_history", "schedule_post", "list_scheduled", "delete_scheduled", "send_scheduled_now", "edit_post", "pin_post", "unpin_post", "delete_post", "forward_post", "react", "search", "status", "engagement_dashboard", "list_admins", "edit_admin", "create_template", "list_templates", "use_template", "delete_template"],
+    description: "Action to perform",
+  }),
   text: Type.Optional(Type.String({ description: "Post text content" })),
   parseMode: Type.Optional(
-    Type.Union([
-      Type.Literal("HTML"),
-      Type.Literal("Markdown"),
-      Type.Literal("MarkdownV2"),
-    ]),
+    Type.Unsafe<"HTML" | "Markdown" | "MarkdownV2">({
+      type: "string",
+      enum: ["HTML", "Markdown", "MarkdownV2"],
+      description: "Parse mode for text formatting",
+    }),
   ),
   silent: Type.Optional(
     Type.Boolean({ description: "Send without notification" }),
@@ -214,7 +191,7 @@ export function createToolFactory(
       // P1: ownerAllowFrom authorization check
       if (pluginConfig.ownerAllowFrom && pluginConfig.ownerAllowFrom.length > 0) {
         const senderId = ctx.agentAccountId ?? ctx.sessionKey;
-        if (senderId && !pluginConfig.ownerAllowFrom.includes(senderId)) {
+        if (senderId && senderId !== "default" && !pluginConfig.ownerAllowFrom.includes(senderId)) {
           return jsonResult({
             error: `Access denied: sender "${senderId}" is not in ownerAllowFrom list.`,
           });

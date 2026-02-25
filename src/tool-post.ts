@@ -18,18 +18,11 @@ import {
 } from "./tool-shared.js";
 
 const PostToolParams = Type.Object({
-  action: Type.Union([
-    Type.Literal("post"),
-    Type.Literal("edit_post"),
-    Type.Literal("delete_post"),
-    Type.Literal("forward_post"),
-    Type.Literal("sync"),
-    Type.Literal("list_recent_activity"),
-    Type.Literal("create_template"),
-    Type.Literal("list_templates"),
-    Type.Literal("use_template"),
-    Type.Literal("delete_template"),
-  ]),
+  action: Type.Unsafe<"post" | "edit_post" | "delete_post" | "forward_post" | "sync" | "list_recent_activity" | "create_template" | "list_templates" | "use_template" | "delete_template">({
+    type: "string",
+    enum: ["post", "edit_post", "delete_post", "forward_post", "sync", "list_recent_activity", "create_template", "list_templates", "use_template", "delete_template"],
+    description: "Action to perform",
+  }),
   ...SharedParams,
   toChatId: Type.Optional(
     Type.String({ description: "Target chat ID for forward_post" }),
