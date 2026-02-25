@@ -36,8 +36,11 @@ export function registerHooks(
 
       if (ctx.channelId !== "telegram") return;
 
-      const conversationId = ctx.conversationId;
-      if (!conversationId) return;
+      const rawConversationId = ctx.conversationId;
+      if (!rawConversationId) return;
+
+      // OpenClaw prefixes conversationId with "telegram:" — strip it for matching
+      const conversationId = rawConversationId.replace(/^telegram:/, "");
 
       const isFromChannel = conversationId === channelChatId;
       const isFromDiscussion =
@@ -45,33 +48,34 @@ export function registerHooks(
 
       if (!isFromChannel && !isFromDiscussion) {
         api.logger.info(
-          `[tg-admin-debug] skipped: conversationId=${conversationId} ` +
+          `[tg-admin-debug] skipped: conversationId=${rawConversationId} (stripped=${conversationId}) ` +
             `doesn't match channel=${channelChatId} or discussion=${discussionChatId ?? "none"}`,
         );
         return;
       }
 
       const metadata = (event.metadata ?? {}) as Record<string, unknown>;
-      const messageId =
-        typeof metadata.messageId === "number"
-          ? metadata.messageId
-          : undefined;
-      const threadId =
-        typeof metadata.threadId === "number"
-          ? metadata.threadId
-          : undefined;
+
+      // Log full metadata for debugging — helps identify available fields
+      api.logger.debug?.(
+        `[tg-admin] metadata keys=${Object.keys(metadata).join(",") || "(empty)"} ` +
+          `raw=${JSON.stringify(metadata).slice(0, 500)}`,
+      );
+
+      // OpenClaw may pass numeric fields as strings — coerce to number
+      const rawMessageId = metadata.messageId ?? metadata.message_id;
+      const parsedMsgId = rawMessageId != null ? Number(rawMessageId) : NaN;
+      const messageId = Number.isFinite(parsedMsgId) ? parsedMsgId : undefined;
+      const rawThreadId = metadata.threadId ?? metadata.thread_id;
+      const parsedThreadId = rawThreadId != null ? Number(rawThreadId) : NaN;
+      const threadId = Number.isFinite(parsedThreadId) ? parsedThreadId : undefined;
       const senderName =
-        typeof metadata.senderName === "string"
-          ? metadata.senderName
-          : undefined;
+        (metadata.senderName ?? metadata.sender_name) as string | undefined;
       const senderUsername =
-        typeof metadata.senderUsername === "string"
-          ? metadata.senderUsername
-          : undefined;
+        (metadata.senderUsername ?? metadata.sender_username) as string | undefined;
       const isAutoForward =
-        typeof metadata.is_automatic_forward === "boolean"
-          ? metadata.is_automatic_forward
-          : false;
+        metadata.is_automatic_forward === true ||
+        metadata.isAutoForward === true;
       const fileId =
         typeof metadata.fileId === "string" ? metadata.fileId : undefined;
 
@@ -97,12 +101,16 @@ export function registerHooks(
           api.logger.debug?.("skipped comment: no messageId in metadata");
           return;
         }
+        // Prefer senderId from metadata (actual user), event.from may be group ID
+        const senderId =
+          typeof metadata.senderId === "string" ? metadata.senderId : event.from;
+
         await comments.add({
           messageId,
           chatId: conversationId,
           text: event.content,
           timestamp: event.timestamp ?? Date.now(),
-          from: event.from,
+          from: senderId,
           fromName: senderName ?? senderUsername,
           threadId,
           isAutoForward: false,
