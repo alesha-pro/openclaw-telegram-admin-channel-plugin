@@ -14,6 +14,11 @@ export const TelegramAdminChannelConfigSchema = Type.Object({
   defaults: Type.Optional(
     Type.Object({
       silent: Type.Optional(Type.Boolean()),
+      parseMode: Type.Optional(
+        Type.Union([Type.Literal("HTML"), Type.Literal("Markdown"), Type.Literal("MarkdownV2")], {
+          description: "Default parse mode for posts when not specified explicitly",
+        }),
+      ),
     }),
   ),
   dangerousActions: Type.Optional(

@@ -6,31 +6,7 @@ import type { TelegramAdminChannelConfig } from "./schema.js";
 import type { CommentStorage, PostStorage, StoredComment } from "./storage.js";
 import type { MtprotoClient } from "./mtproto-client.js";
 import { resolveBotToken, TelegramBotApi } from "./telegram-api.js";
-
-/** Convert LLM markdown output to Telegram HTML */
-function toTelegramHtml(text: string): string {
-  let html = text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-
-  // Code blocks: ```lang\ncode\n``` → <pre>code</pre>
-  html = html.replace(/```(?:\w*\n)?([\s\S]*?)```/g, (_m, code: string) => `<pre>${code.trim()}</pre>`);
-
-  // Inline code: `code` → <code>code</code>
-  html = html.replace(/`([^`\n]+)`/g, "<code>$1</code>");
-
-  // Bold: **text** → <b>text</b>
-  html = html.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
-
-  // Italic: *text* (not inside bold)
-  html = html.replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, "<i>$1</i>");
-
-  // Strikethrough: ~~text~~ → <s>text</s>
-  html = html.replace(/~~(.+?)~~/g, "<s>$1</s>");
-
-  return html;
-}
+import { toTelegramHtml } from "./tool-shared.js";
 
 type PluginLogger = {
   debug?: (message: string) => void;
@@ -108,7 +84,15 @@ async function callAgentApi(params: {
   }
 
   const data = (await response.json()) as { choices?: { message?: { content?: string } }[] };
-  return data?.choices?.[0]?.message?.content ?? null;
+  let content = data?.choices?.[0]?.message?.content ?? null;
+
+  // Strip any leaked XML tool calls from the response text
+  if (content) {
+    content = content.replace(/<function_calls>[\s\S]*?<\/function_calls>/g, "").trim();
+    if (!content) return null;
+  }
+
+  return content;
 }
 
 // Track last reply timestamp per thread to enforce cooldown

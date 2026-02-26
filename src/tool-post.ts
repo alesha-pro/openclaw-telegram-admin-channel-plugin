@@ -15,6 +15,8 @@ import {
   checkAuth,
   checkDangerous,
   getConfig,
+  toTelegramHtml,
+  hasMarkdownFormatting,
 } from "./tool-shared.js";
 
 const PostToolParams = Type.Object({
@@ -118,10 +120,18 @@ async function executePost(
   const token = resolveBotToken(api.config, pluginConfig.telegramAccountId);
   const silent = params.silent ?? pluginConfig.defaults?.silent ?? false;
 
+  // Auto-convert markdown to HTML when no parseMode is specified
+  let text = params.text;
+  let parseMode = params.parseMode ?? pluginConfig.defaults?.parseMode;
+  if (!parseMode && hasMarkdownFormatting(text)) {
+    text = toTelegramHtml(text);
+    parseMode = "HTML";
+  }
+
   logger.info(`Posting to channel ${chatId}...`);
 
-  const result = await TelegramBotApi.sendMessage(token, chatId, params.text, {
-    parseMode: params.parseMode,
+  const result = await TelegramBotApi.sendMessage(token, chatId, text, {
+    parseMode,
     disableNotification: silent,
   });
 
@@ -160,9 +170,17 @@ async function executeEditPost(
 
   const chatId = pluginConfig.channel.chatId;
 
+  // Auto-convert markdown to HTML when no parseMode is specified
+  let text = params.text;
+  let parseMode = params.parseMode ?? pluginConfig.defaults?.parseMode;
+  if (!parseMode && hasMarkdownFormatting(text)) {
+    text = toTelegramHtml(text);
+    parseMode = "HTML";
+  }
+
   if (mtprotoClient) {
     try {
-      await mtprotoClient.editMessage(chatId, params.messageId, params.text);
+      await mtprotoClient.editMessage(chatId, params.messageId, text);
       return jsonResult({ ok: true, messageId: params.messageId, action: "edited" });
     } catch (e) {
       return jsonResult({ error: `MTProto error: ${e instanceof Error ? e.message : String(e)}` });
@@ -171,8 +189,8 @@ async function executeEditPost(
 
   try {
     const token = resolveBotToken(api.config, pluginConfig.telegramAccountId);
-    await TelegramBotApi.editMessageText(token, chatId, params.messageId, params.text, {
-      parseMode: params.parseMode,
+    await TelegramBotApi.editMessageText(token, chatId, params.messageId, text, {
+      parseMode,
     });
     return jsonResult({ ok: true, messageId: params.messageId, action: "edited" });
   } catch (e) {

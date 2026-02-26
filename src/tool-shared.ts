@@ -88,6 +88,41 @@ export function getConfig(
   return { cfg: pluginConfig };
 }
 
+/**
+ * Convert markdown formatting to Telegram-compatible HTML.
+ * Handles: **bold**, *italic*, `code`, ```code blocks```, ~~strikethrough~~
+ */
+export function toTelegramHtml(text: string): string {
+  let html = text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+
+  // Code blocks: ```lang\ncode\n``` → <pre>code</pre>
+  html = html.replace(/```(?:\w*\n)?([\s\S]*?)```/g, (_m, code: string) => `<pre>${code.trim()}</pre>`);
+
+  // Inline code: `code` → <code>code</code>
+  html = html.replace(/`([^`\n]+)`/g, "<code>$1</code>");
+
+  // Bold: **text** → <b>text</b>
+  html = html.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
+
+  // Italic: *text* (not inside bold)
+  html = html.replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, "<i>$1</i>");
+
+  // Strikethrough: ~~text~~ → <s>text</s>
+  html = html.replace(/~~(.+?)~~/g, "<s>$1</s>");
+
+  return html;
+}
+
+const MD_PATTERN = /\*\*.+?\*\*|\*[^*]+\*|`.+?`|~~.+?~~/;
+
+/** Returns true if text contains markdown formatting that should be converted */
+export function hasMarkdownFormatting(text: string): boolean {
+  return MD_PATTERN.test(text);
+}
+
 export function requireMtproto(client?: MtprotoClient): ToolResult | null {
   if (!client) {
     return jsonResult({
