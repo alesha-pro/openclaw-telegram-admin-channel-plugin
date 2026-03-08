@@ -55,7 +55,7 @@ Publishing · Comments · Editing · Scheduling · Analytics · Templates · Adm
 | Feature | Description |
 |---------|-------------|
 | **Views & Forwards** | Get view/forward counts for specific messages |
-| **Comments** | Read discussion comments for posts and reply manually |
+| **Comments** | Read discussion comments, reply to comments, post new comments under posts |
 | **Channel Stats** | Subscribers, reach, growth, engagement analytics |
 | **Post Stats** | Per-post statistics with view/reaction graphs |
 | **Engagement Dashboard** | Top posts, best posting hours, growth trends |
@@ -292,8 +292,9 @@ The plugin registers 6 tools. The legacy `tg_channel_admin` covers core channel 
 |--------|------------|-------------|
 | `list_comments` | `postMessageId?`, `limit?` | List recent comments, optionally only for a specific channel post |
 | `reply_comment` | `commentMessageId`, `replyText`, `postMessageId?`, `parseMode?` | Reply to a specific discussion comment |
+| `post_comment` | `postMessageId`, `replyText`, `parseMode?` | Post a new top-level comment under a channel post |
 
-`tg_channel_comments` reads comments on demand from the linked discussion group via MTProto. Comments are not stored locally; replies are sent through the Bot API into the same discussion thread.
+`tg_channel_comments` reads comments on demand from the linked discussion group via MTProto. Comments are not stored locally; replies and new comments are sent through the Bot API into the discussion thread.
 
 ### `tg_channel_stats` — Statistics (MTProto)
 
@@ -339,6 +340,7 @@ Media parameters for `schedule_post`: `photoFileIds`, `photoPaths`, `videoFileId
 > Show me the recent activity in the channel
 > Show recent comments for post #42
 > Reply to comment #135 with "Thanks for the feedback!"
+> Post a comment under post #42: "Great discussion, keep it up!"
 > How many views did posts 42, 43, 44 get?
 > What are the channel stats lately?
 > Show me an engagement dashboard for the last 30 days
@@ -380,7 +382,7 @@ Plugin (src/index.ts)
 ├── Tools
 │   ├── tg_channel_admin        ← legacy monolithic (backward compat)
 │   ├── tg_channel_post         ← post, edit, delete, forward, sync, templates
-│   ├── tg_channel_comments     ← list comments, reply to comments (MTProto)
+│   ├── tg_channel_comments     ← list, reply, post comments (MTProto + Bot API)
 │   ├── tg_channel_stats        ← views, channel/post stats, engagement (MTProto)
 │   ├── tg_channel_schedule     ← schedule, list, delete, send now (MTProto)
 │   └── tg_channel_manage       ← pin, react, search, status, admins
@@ -414,7 +416,8 @@ Plugin (src/index.ts)
 │                                                                 │
 │ Comment tool → MTProto getHistory(discussion group)             │
 │              → filter by thread/post                            │
-│              → Bot API reply_to_message for manual replies      │
+│              → Bot API sendMessage for replies & new comments   │
+│              → MTProto getDiscussionMessage for thread resolve  │
 └─────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────┐
@@ -467,7 +470,7 @@ src/
 ├── tool.ts                # Legacy monolithic tg_channel_admin (backward compat)
 ├── tool-shared.ts         # Shared types, auth/dangerous checks, getConfig()
 ├── tool-post.ts           # tg_channel_post (post, edit, delete, forward, sync, templates)
-├── tool-comments.ts       # tg_channel_comments (list comments, reply to comments)
+├── tool-comments.ts       # tg_channel_comments (list, reply, post comments)
 ├── tool-stats.ts          # tg_channel_stats (views, channel/post stats, engagement)
 ├── tool-schedule.ts       # tg_channel_schedule (schedule, list, delete, send now)
 ├── tool-manage.ts         # tg_channel_manage (pin, react, search, status, admins)

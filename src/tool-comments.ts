@@ -19,9 +19,9 @@ import {
 } from "./tool-shared.js";
 
 const CommentsToolParams = Type.Object({
-  action: Type.Unsafe<"list_comments" | "reply_comment">({
+  action: Type.Unsafe<"list_comments" | "reply_comment" | "post_comment">({
     type: "string",
-    enum: ["list_comments", "reply_comment"],
+    enum: ["list_comments", "reply_comment", "post_comment"],
     description: "Action to perform",
   }),
   limit: Type.Optional(
@@ -34,7 +34,7 @@ const CommentsToolParams = Type.Object({
     Type.Number({ description: "Discussion group comment message ID to reply to" }),
   ),
   replyText: Type.Optional(
-    Type.String({ description: "Reply text for reply_comment" }),
+    Type.String({ description: "Text content for reply_comment or post_comment" }),
   ),
   parseMode: Type.Optional(
     Type.Unsafe<"HTML" | "Markdown" | "MarkdownV2">({
@@ -50,7 +50,8 @@ type Params = Static<typeof CommentsToolParams>;
 const DESCRIPTION =
   "Telegram discussion comments (requires MTProto and discussion.chatId): " +
   "'list_comments' (list comments for a post or recent discussion comments; optional 'postMessageId' and 'limit'), " +
-  "'reply_comment' (reply to a specific comment; requires 'commentMessageId' and 'replyText', optional 'postMessageId').";
+  "'reply_comment' (reply to a specific comment; requires 'commentMessageId' and 'replyText', optional 'postMessageId'), " +
+  "'post_comment' (post a new top-level comment under a channel post; requires 'postMessageId' and 'replyText').";
 
 type DiscussionComment = {
   messageId: number;
@@ -84,6 +85,8 @@ export function createCommentsToolFactory(
           return executeListComments(params, cfg, mtprotoClient);
         case "reply_comment":
           return executeReplyComment(params, cfg, api, mtprotoClient);
+        case "post_comment":
+          return executePostComment(params, cfg, api, mtprotoClient);
         default:
           return jsonResult({ error: `Unknown action: ${String(params.action)}` });
       }
@@ -204,6 +207,69 @@ function prepareReplyPayload(
     return { text: toTelegramHtml(replyText), parseMode: "HTML" };
   }
   return { text: replyText };
+}
+
+async function executePostComment(
+  params: Params,
+  pluginConfig: TelegramAdminChannelConfig,
+  api: OpenClawPluginApi,
+  mtprotoClient?: MtprotoClient,
+) {
+  const err = requireMtproto(mtprotoClient);
+  if (err) return err;
+
+  const discussionChatId = pluginConfig.discussion?.chatId;
+  if (!discussionChatId) {
+    return jsonResult({ error: "discussion.chatId is required for comment actions" });
+  }
+  if (params.postMessageId == null) {
+    return jsonResult({ error: "'postMessageId' parameter is required for 'post_comment'" });
+  }
+  if (!params.replyText) {
+    return jsonResult({ error: "'replyText' parameter is required for 'post_comment'" });
+  }
+
+  try {
+    const channelChatId = pluginConfig.channel.chatId;
+    const threadId = await mtprotoClient!.getDiscussionThreadId(channelChatId, params.postMessageId);
+
+    const token = resolveBotToken(api.config, pluginConfig.telegramAccountId);
+    const prepared = prepareReplyPayload(params.replyText, params.parseMode);
+
+    let sendResult: TelegramApiResult;
+    try {
+      sendResult = await TelegramBotApi.sendMessage(
+        token,
+        discussionChatId,
+        prepared.text,
+        {
+          parseMode: prepared.parseMode,
+          replyToMessageId: threadId,
+          messageThreadId: threadId,
+        },
+      );
+    } catch {
+      sendResult = await TelegramBotApi.sendMessage(
+        token,
+        discussionChatId,
+        params.replyText,
+        {
+          replyToMessageId: threadId,
+          messageThreadId: threadId,
+        },
+      );
+    }
+
+    return jsonResult({
+      ok: true,
+      action: "commented",
+      postMessageId: params.postMessageId,
+      threadId,
+      commentMessageId: sendResult.result?.message_id ?? 0,
+    });
+  } catch (e) {
+    return jsonResult({ error: `Error: ${e instanceof Error ? e.message : String(e)}` });
+  }
 }
 
 async function collectDiscussionComments(

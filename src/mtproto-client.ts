@@ -618,6 +618,72 @@ export class MtprotoClient {
     );
   }
 
+  // --- Get discussion thread ID for a channel post ---
+
+  async getDiscussionThreadId(
+    channelPeer: string,
+    postMessageId: number,
+  ): Promise<number> {
+    const client = await this.ensureConnected();
+    const inputPeer = await client.getInputEntity(channelPeer);
+
+    const result = await this.invoke<Api.messages.DiscussionMessage>(
+      new Api.messages.GetDiscussionMessage({
+        peer: inputPeer,
+        msgId: postMessageId,
+      }),
+    );
+
+    const threadMsg = result.messages[0];
+    if (!(threadMsg instanceof Api.Message)) {
+      throw new Error(`No discussion thread found for post ${postMessageId}`);
+    }
+    return n(threadMsg.id);
+  }
+
+  // --- Send message (e.g. reply in discussion) ---
+
+  async sendMessage(
+    peer: string,
+    text: string,
+    opts?: { replyToMsgId?: number; topMsgId?: number; silent?: boolean },
+  ): Promise<{ messageId: number }> {
+    const client = await this.ensureConnected();
+    const inputPeer = await client.getInputEntity(peer);
+
+    const replyTo = opts?.replyToMsgId
+      ? new Api.InputReplyToMessage({
+          replyToMsgId: opts.replyToMsgId,
+          topMsgId: opts.topMsgId,
+        })
+      : undefined;
+
+    const result = await this.invoke<Api.TypeUpdates>(
+      new Api.messages.SendMessage({
+        peer: inputPeer,
+        message: text,
+        replyTo,
+        silent: opts?.silent,
+        randomId: generateRandomId(),
+      }),
+    );
+
+    let msgId = 0;
+    if (result instanceof Api.Updates || result instanceof Api.UpdatesCombined) {
+      for (const upd of result.updates) {
+        if (
+          (upd instanceof Api.UpdateNewMessage || upd instanceof Api.UpdateNewChannelMessage) &&
+          upd.message instanceof Api.Message
+        ) {
+          msgId = n(upd.message.id);
+          break;
+        }
+      }
+    }
+
+    return { messageId: msgId };
+  }
+
   // --- F1: Edit message ---
 
   async editMessage(
