@@ -4,7 +4,7 @@ import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 
 import type { TelegramAdminChannelConfig } from "./schema.js";
 import { resolveBotToken, TelegramBotApi } from "./telegram-api.js";
-import type { PostStorage, CommentStorage } from "./storage.js";
+import type { PostStorage } from "./storage.js";
 import type { MtprotoClient } from "./mtproto-client.js";
 import {
   type ToolContext,
@@ -16,9 +16,9 @@ import {
 } from "./tool-shared.js";
 
 const ManageToolParams = Type.Object({
-  action: Type.Unsafe<"pin_post" | "unpin_post" | "react" | "search" | "status" | "list_admins" | "edit_admin" | "list_pending_comments" | "reply_comment" | "skip_comment">({
+  action: Type.Unsafe<"pin_post" | "unpin_post" | "react" | "search" | "status" | "list_admins" | "edit_admin">({
     type: "string",
-    enum: ["pin_post", "unpin_post", "react", "search", "status", "list_admins", "edit_admin", "list_pending_comments", "reply_comment", "skip_comment"],
+    enum: ["pin_post", "unpin_post", "react", "search", "status", "list_admins", "edit_admin"],
     description: "Action to perform",
   }),
   ...SharedParams,
@@ -29,20 +29,14 @@ const ManageToolParams = Type.Object({
     Type.String({ description: "Search query for search action" }),
   ),
   searchType: Type.Optional(
-    Type.Unsafe<"post" | "comment" | "all">({
+    Type.Unsafe<"post">({
       type: "string",
-      enum: ["post", "comment", "all"],
-      description: "Type filter for search (default: all)",
+      enum: ["post"],
+      description: "Type filter for search (default: post)",
     }),
   ),
   userId: Type.Optional(
     Type.Union([Type.Number(), Type.String()], { description: "User ID for edit_admin" }),
-  ),
-  replyText: Type.Optional(
-    Type.String({ description: "Text to reply with for reply_comment action" }),
-  ),
-  chatId: Type.Optional(
-    Type.String({ description: "Chat ID for comment operations (defaults to discussion chatId)" }),
   ),
   adminRights: Type.Optional(
     Type.Object({
@@ -68,18 +62,14 @@ const DESCRIPTION =
   "Telegram channel management: " +
   "'pin_post'/'unpin_post' (pin/unpin message, requires 'messageId'), " +
   "'react' (set reaction, requires 'messageId' and 'emoji', MTProto only), " +
-  "'search' (search posts/comments, requires 'query'), " +
+  "'search' (search posts, requires 'query'), " +
   "'status' (check connection status), " +
   "'list_admins' (list channel administrators, MTProto only), " +
-  "'edit_admin' (edit admin rights, requires 'userId' and 'adminRights', MTProto only), " +
-  "'list_pending_comments' (list comments awaiting reply), " +
-  "'reply_comment' (manually reply to a comment, requires 'messageId' and 'replyText'), " +
-  "'skip_comment' (mark comment as skipped, requires 'messageId').";
+  "'edit_admin' (edit admin rights, requires 'userId' and 'adminRights', MTProto only).";
 
 export function createManageToolFactory(
   api: OpenClawPluginApi,
   posts: PostStorage,
-  comments: CommentStorage,
   mtprotoClient?: MtprotoClient,
 ) {
   return (ctx: ToolContext) => ({
@@ -105,19 +95,13 @@ export function createManageToolFactory(
         case "react":
           return executeReact(params, cfg, mtprotoClient);
         case "search":
-          return executeSearch(params, posts, comments);
+          return executeSearch(params, posts);
         case "status":
-          return executeStatus(cfg, api, posts, comments, mtprotoClient);
+          return executeStatus(cfg, api, posts, mtprotoClient);
         case "list_admins":
           return executeListAdmins(cfg, mtprotoClient);
         case "edit_admin":
           return executeEditAdmin(params, cfg, mtprotoClient);
-        case "list_pending_comments":
-          return executeListPendingComments(params, comments);
-        case "reply_comment":
-          return executeReplyComment(params, cfg, api, comments);
-        case "skip_comment":
-          return executeSkipComment(params, cfg, comments);
         default:
           return jsonResult({ error: `Unknown action: ${String(params.action)}` });
       }
@@ -211,24 +195,15 @@ async function executeReact(
 async function executeSearch(
   params: Params,
   posts: PostStorage,
-  comments: CommentStorage,
 ) {
   if (!params.query) {
     return jsonResult({ error: "'query' parameter is required for 'search'" });
   }
-  const searchType = params.searchType ?? "all";
   const limit = params.limit ?? 20;
-  const results: Array<{ type: "post" | "comment"; data: unknown }> = [];
+  const results: Array<{ type: "post"; data: unknown }> = [];
 
-  if (searchType === "all" || searchType === "post") {
-    for (const p of await posts.search(params.query, { limit })) {
-      results.push({ type: "post", data: p });
-    }
-  }
-  if (searchType === "all" || searchType === "comment") {
-    for (const c of await comments.search(params.query, { limit })) {
-      results.push({ type: "comment", data: c });
-    }
+  for (const p of await posts.search(params.query, { limit })) {
+    results.push({ type: "post", data: p });
   }
 
   return jsonResult({ ok: true, query: params.query, count: results.length, results: results.slice(0, limit) });
@@ -238,7 +213,6 @@ async function executeStatus(
   pluginConfig: TelegramAdminChannelConfig,
   api: OpenClawPluginApi,
   posts: PostStorage,
-  comments: CommentStorage,
   mtprotoClient?: MtprotoClient,
 ) {
   let botOk = false;
@@ -250,16 +224,14 @@ async function executeStatus(
   } catch { /* ignore */ }
 
   const allPosts = await posts.getAll();
-  const allComments = await comments.getFiltered();
 
   return jsonResult({
     ok: true, botOk,
     mtprotoEnabled: !!pluginConfig.mtproto?.enabled,
     mtprotoConnected: mtprotoClient?.isConnected ?? false,
     dangerousActionsEnabled: pluginConfig.dangerousActions?.enabled ?? false,
-    postsCount: allPosts.length, commentsCount: allComments.length,
+    postsCount: allPosts.length,
     channelChatId: pluginConfig.channel.chatId,
-    discussionChatId: pluginConfig.discussion?.chatId,
   });
 }
 
@@ -299,100 +271,4 @@ async function executeEditAdmin(
   } catch (e) {
     return jsonResult({ error: `MTProto error: ${e instanceof Error ? e.message : String(e)}` });
   }
-}
-
-async function executeListPendingComments(
-  params: Params,
-  comments: CommentStorage,
-) {
-  const limit = params.limit ?? 20;
-  const pending = await comments.getPending(limit);
-  return jsonResult({
-    ok: true,
-    count: pending.length,
-    comments: pending.map((c) => ({
-      messageId: c.messageId,
-      chatId: c.chatId,
-      from: c.from,
-      fromName: c.fromName,
-      text: c.text.slice(0, 300),
-      threadId: c.threadId,
-      timestamp: c.timestamp,
-    })),
-  });
-}
-
-async function executeReplyComment(
-  params: Params,
-  pluginConfig: TelegramAdminChannelConfig,
-  api: OpenClawPluginApi,
-  comments: CommentStorage,
-) {
-  if (params.messageId == null) {
-    return jsonResult({ error: "'messageId' is required for 'reply_comment'" });
-  }
-  if (!params.replyText) {
-    return jsonResult({ error: "'replyText' is required for 'reply_comment'" });
-  }
-
-  const discussionChatId = pluginConfig.discussion?.chatId;
-  if (!discussionChatId) {
-    return jsonResult({ error: "discussion.chatId not configured" });
-  }
-
-  const chatId = params.chatId ?? discussionChatId;
-  const comment = await comments.getByMessageId(params.messageId, chatId);
-  if (!comment) {
-    return jsonResult({ error: `Comment ${params.messageId} not found in chat ${chatId}` });
-  }
-
-  try {
-    const token = resolveBotToken(api.config, pluginConfig.telegramAccountId);
-    const sendResult = await TelegramBotApi.sendMessage(
-      token,
-      discussionChatId,
-      params.replyText,
-      {
-        replyToMessageId: params.messageId,
-        messageThreadId: comment.threadId,
-      },
-    );
-
-    const replyMsgId = sendResult.result?.message_id ?? 0;
-    await comments.markReplied(params.messageId, chatId, {
-      replyMessageId: replyMsgId,
-    });
-
-    return jsonResult({
-      ok: true,
-      messageId: params.messageId,
-      replyMessageId: replyMsgId,
-      action: "replied",
-    });
-  } catch (e) {
-    return jsonResult({ error: `Telegram API error: ${e instanceof Error ? e.message : String(e)}` });
-  }
-}
-
-async function executeSkipComment(
-  params: Params,
-  pluginConfig: TelegramAdminChannelConfig,
-  comments: CommentStorage,
-) {
-  if (params.messageId == null) {
-    return jsonResult({ error: "'messageId' is required for 'skip_comment'" });
-  }
-
-  const discussionChatId = pluginConfig.discussion?.chatId;
-  if (!discussionChatId) {
-    return jsonResult({ error: "discussion.chatId not configured" });
-  }
-
-  const chatId = params.chatId ?? discussionChatId;
-  const found = await comments.markSkipped(params.messageId, chatId);
-  if (!found) {
-    return jsonResult({ error: `Comment ${params.messageId} not found in chat ${chatId}` });
-  }
-
-  return jsonResult({ ok: true, messageId: params.messageId, action: "skipped" });
 }

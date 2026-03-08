@@ -6,7 +6,7 @@ import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 
 import type { TelegramAdminChannelConfig } from "./schema.js";
 import { resolveBotToken, TelegramBotApi, fetchPublicChannelPosts } from "./telegram-api.js";
-import type { PostStorage, CommentStorage, TemplateStorage } from "./storage.js";
+import type { PostStorage, TemplateStorage } from "./storage.js";
 import type { MtprotoClient } from "./mtproto-client.js";
 import {
   type ToolContext,
@@ -56,7 +56,6 @@ const DESCRIPTION =
 export function createPostToolFactory(
   api: OpenClawPluginApi,
   posts: PostStorage,
-  comments: CommentStorage,
   mtprotoClient?: MtprotoClient,
   templates?: TemplateStorage,
 ) {
@@ -89,7 +88,7 @@ export function createPostToolFactory(
         case "sync":
           return executeSync(cfg, posts, logger, mtprotoClient);
         case "list_recent_activity":
-          return executeListRecentActivity(params, posts, comments);
+          return executeListRecentActivity(params, posts);
         case "create_template":
           return executeCreateTemplate(params, templates);
         case "list_templates":
@@ -320,20 +319,11 @@ async function executeSync(
 async function executeListRecentActivity(
   params: Params,
   posts: PostStorage,
-  comments: CommentStorage,
 ) {
   const limit = params.limit ?? 10;
   const recentPosts = await posts.getAll(limit);
-  const recentComments = await comments.getFiltered({ limit });
 
-  type ActivityItem =
-    | { type: "post"; data: (typeof recentPosts)[number] }
-    | { type: "comment"; data: (typeof recentComments)[number] };
-
-  const items: ActivityItem[] = [
-    ...recentPosts.map((p) => ({ type: "post" as const, data: p })),
-    ...recentComments.map((c) => ({ type: "comment" as const, data: c })),
-  ];
+  const items = recentPosts.map((p) => ({ type: "post" as const, data: p }));
   items.sort((a, b) => b.data.timestamp - a.data.timestamp);
 
   return jsonResult({ ok: true, count: items.length, activity: items.slice(0, limit) });

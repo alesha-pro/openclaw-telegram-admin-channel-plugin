@@ -12,7 +12,7 @@ type ToolContext = {
 
 import type { TelegramAdminChannelConfig } from "./schema.js";
 import { resolveBotToken, TelegramBotApi, fetchPublicChannelPosts } from "./telegram-api.js";
-import type { PostStorage, CommentStorage, TemplateStorage } from "./storage.js";
+import type { PostStorage, TemplateStorage } from "./storage.js";
 import type { MtprotoClient } from "./mtproto-client.js";
 
 const ToolParameters = Type.Object({
@@ -161,7 +161,6 @@ const DANGEROUS_ACTIONS = new Set([
 export function createToolFactory(
   api: OpenClawPluginApi,
   posts: PostStorage,
-  comments: CommentStorage,
   mtprotoClient?: MtprotoClient,
   templates?: TemplateStorage,
 ) {
@@ -210,7 +209,6 @@ export function createToolFactory(
         pluginConfig,
         api,
         posts,
-        comments,
         logger,
         mtprotoClient,
         templates,
@@ -225,7 +223,6 @@ async function executeAction(
   pluginConfig: TelegramAdminChannelConfig,
   api: OpenClawPluginApi,
   posts: PostStorage,
-  comments: CommentStorage,
   logger: PluginLogger,
   mtprotoClient?: MtprotoClient,
   templates?: TemplateStorage,
@@ -236,7 +233,7 @@ async function executeAction(
     case "sync":
       return executeSync(pluginConfig, posts, logger, mtprotoClient);
     case "list_recent_activity":
-      return executeListRecentActivity(params, posts, comments);
+      return executeListRecentActivity(params, posts);
     case "get_views":
       return executeGetViews(params, pluginConfig, mtprotoClient);
     case "get_channel_stats":
@@ -266,9 +263,9 @@ async function executeAction(
     case "react":
       return executeReact(params, pluginConfig, mtprotoClient);
     case "search":
-      return executeSearch(params, posts, comments);
+      return executeSearch(params, posts);
     case "status":
-      return executeStatus(pluginConfig, api, posts, comments, mtprotoClient);
+      return executeStatus(pluginConfig, api, posts, mtprotoClient);
     case "engagement_dashboard":
       return executeEngagementDashboard(params, pluginConfig, mtprotoClient);
     case "list_admins":
@@ -439,21 +436,11 @@ async function executeSync(
 async function executeListRecentActivity(
   params: ToolParams,
   posts: PostStorage,
-  comments: CommentStorage,
 ) {
   const limit = params.limit ?? 10;
   const recentPosts = await posts.getAll(limit);
-  const recentComments = await comments.getFiltered({ limit });
 
-  type ActivityItem =
-    | { type: "post"; data: (typeof recentPosts)[number] }
-    | { type: "comment"; data: (typeof recentComments)[number] };
-
-  const items: ActivityItem[] = [
-    ...recentPosts.map((p) => ({ type: "post" as const, data: p })),
-    ...recentComments.map((c) => ({ type: "comment" as const, data: c })),
-  ];
-
+  const items = recentPosts.map((p) => ({ type: "post" as const, data: p }));
   items.sort((a, b) => b.data.timestamp - a.data.timestamp);
 
   return jsonResult({
@@ -1006,29 +993,17 @@ async function executeReact(
 async function executeSearch(
   params: ToolParams,
   posts: PostStorage,
-  comments: CommentStorage,
 ) {
   if (!params.query) {
     return jsonResult({ error: "'query' parameter is required for 'search'" });
   }
 
-  const searchType = params.searchType ?? "all";
   const limit = params.limit ?? 20;
+  const results: Array<{ type: "post"; data: unknown }> = [];
 
-  const results: Array<{ type: "post" | "comment"; data: unknown }> = [];
-
-  if (searchType === "all" || searchType === "post") {
-    const matchedPosts = await posts.search(params.query, { limit });
-    for (const p of matchedPosts) {
-      results.push({ type: "post", data: p });
-    }
-  }
-
-  if (searchType === "all" || searchType === "comment") {
-    const matchedComments = await comments.search(params.query, { limit });
-    for (const c of matchedComments) {
-      results.push({ type: "comment", data: c });
-    }
+  const matchedPosts = await posts.search(params.query, { limit });
+  for (const p of matchedPosts) {
+    results.push({ type: "post", data: p });
   }
 
   return jsonResult({
@@ -1044,7 +1019,6 @@ async function executeStatus(
   pluginConfig: TelegramAdminChannelConfig,
   api: OpenClawPluginApi,
   posts: PostStorage,
-  comments: CommentStorage,
   mtprotoClient?: MtprotoClient,
 ) {
   let botOk = false;
@@ -1058,7 +1032,6 @@ async function executeStatus(
   }
 
   const allPosts = await posts.getAll();
-  const allComments = await comments.getFiltered();
 
   return jsonResult({
     ok: true,
@@ -1067,9 +1040,7 @@ async function executeStatus(
     mtprotoConnected: mtprotoClient?.isConnected ?? false,
     dangerousActionsEnabled: pluginConfig.dangerousActions?.enabled ?? false,
     postsCount: allPosts.length,
-    commentsCount: allComments.length,
     channelChatId: pluginConfig.channel.chatId,
-    discussionChatId: pluginConfig.discussion?.chatId,
   });
 }
 

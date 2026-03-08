@@ -19,21 +19,6 @@ export type StoredPost = {
   fileId?: string;
 };
 
-export type StoredComment = {
-  messageId: number;
-  chatId: string;
-  text: string;
-  timestamp: number;
-  from: string;
-  fromName?: string;
-  threadId?: number;
-  isAutoForward?: boolean;
-  fileId?: string;
-  status?: "pending" | "replied" | "skipped";
-  replyMessageId?: number;
-  repliedAt?: number;
-};
-
 const DEFAULT_LOCK_OPTIONS: FileLockOptions = {
   retries: { retries: 3, factor: 2, minTimeout: 100, maxTimeout: 2000 },
   stale: 10_000,
@@ -140,96 +125,6 @@ export class PostStorage extends JsonFileStore<StoredPost> {
     const matches = this.getItems().filter((p) => p.text.toLowerCase().includes(q));
     const limit = opts?.limit ?? 20;
     return matches.slice(-limit);
-  }
-}
-
-// --- CommentStorage ---
-
-const DEFAULT_MAX_COMMENTS = 10_000;
-
-export class CommentStorage extends JsonFileStore<StoredComment> {
-  constructor(filePath: string, opts?: { maxItems?: number }) {
-    super(filePath, { maxItems: opts?.maxItems ?? DEFAULT_MAX_COMMENTS });
-  }
-
-  async getFiltered(opts?: {
-    limit?: number;
-    threadId?: number;
-  }): Promise<StoredComment[]> {
-    await this.ensureLoaded();
-    let comments = this.getItems();
-    if (opts?.threadId !== undefined) {
-      comments = comments.filter((c) => c.threadId === opts.threadId);
-    }
-    if (opts?.limit && opts.limit > 0) {
-      return comments.slice(-opts.limit);
-    }
-    return comments;
-  }
-
-  async search(query: string, opts?: { limit?: number }): Promise<StoredComment[]> {
-    await this.ensureLoaded();
-    const q = query.toLowerCase();
-    const matches = this.getItems().filter((c) => c.text.toLowerCase().includes(q));
-    const limit = opts?.limit ?? 20;
-    return matches.slice(-limit);
-  }
-
-  async getPending(limit?: number): Promise<StoredComment[]> {
-    await this.ensureLoaded();
-    const pending = this.getItems().filter((c) => c.status === "pending");
-    if (limit && limit > 0) return pending.slice(0, limit);
-    return pending;
-  }
-
-  async markReplied(
-    messageId: number,
-    chatId: string,
-    replyData: { replyMessageId: number },
-  ): Promise<boolean> {
-    await this.ensureLoaded();
-    const item = this.getItems().find(
-      (c) => c.messageId === messageId && c.chatId === chatId,
-    );
-    if (!item) return false;
-    item.status = "replied";
-    item.replyMessageId = replyData.replyMessageId;
-    item.repliedAt = Date.now();
-    await this.save();
-    return true;
-  }
-
-  async markSkipped(messageId: number, chatId: string): Promise<boolean> {
-    await this.ensureLoaded();
-    const item = this.getItems().find(
-      (c) => c.messageId === messageId && c.chatId === chatId,
-    );
-    if (!item) return false;
-    item.status = "skipped";
-    await this.save();
-    return true;
-  }
-
-  async upsertComment(comment: StoredComment): Promise<boolean> {
-    await this.ensureLoaded();
-    const items = this.getItems();
-    const exists = items.some(
-      (c) => c.messageId === comment.messageId && c.chatId === comment.chatId,
-    );
-    if (exists) return false;
-    items.push(comment);
-    await this.save();
-    return true;
-  }
-
-  async getByMessageId(
-    messageId: number,
-    chatId: string,
-  ): Promise<StoredComment | undefined> {
-    await this.ensureLoaded();
-    return this.getItems().find(
-      (c) => c.messageId === messageId && c.chatId === chatId,
-    );
   }
 }
 

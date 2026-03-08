@@ -4,7 +4,7 @@
 
 **Turn your OpenClaw bot into a full-featured Telegram channel admin**
 
-Publishing · Editing · Scheduling · Analytics · Comments · Auto-Reply · Templates · Admin Management
+Publishing · Comments · Editing · Scheduling · Analytics · Templates · Admin Management
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D18-brightgreen.svg)](https://nodejs.org)
@@ -23,7 +23,6 @@ Publishing · Editing · Scheduling · Analytics · Comments · Auto-Reply · Te
 - [Installation](#installation)
 - [Configuration](#configuration)
 - [MTProto Setup](#mtproto-setup)
-- [Discussion Monitor & Auto-Reply](#discussion-monitor--auto-reply)
 - [Tools](#tools)
 - [Slash Commands & CLI](#slash-commands--cli)
 - [How It Works](#how-it-works)
@@ -45,9 +44,9 @@ Publishing · Editing · Scheduling · Analytics · Comments · Auto-Reply · Te
 | **Pin / Unpin** | Pin and unpin channel messages |
 | **Forward** | Forward messages to other chats (batch supported) |
 | **Sync** | Synchronize existing posts from a public channel (HTML scraping) |
-| **Search** | Full-text search across stored posts and comments |
+| **Search** | Full-text search across stored posts |
 | **Templates** | Create, list, use, and delete reusable post templates |
-| **Activity Feed** | View recent activity (posts + comments) |
+| **Activity Feed** | View recent activity (posts) |
 | **Retry with Backoff** | Automatic retry with exponential backoff + Telegram 429 handling |
 | **File Locking** | Concurrent-safe JSON storage with file locks |
 
@@ -55,11 +54,8 @@ Publishing · Editing · Scheduling · Analytics · Comments · Auto-Reply · Te
 
 | Feature | Description |
 |---------|-------------|
-| **Discussion Monitor** | Independent MTProto polling of the discussion group for comments |
-| **Auto-Reply** | AI-powered automatic responses to comments with per-thread cooldown |
-| **Comment Notifications** | Throttled notifications on new comments to a configured chat |
-| **Comment Management** | List pending, reply, skip — manual control over comment processing |
 | **Views & Forwards** | Get view/forward counts for specific messages |
+| **Comments** | Read discussion comments for posts and reply manually |
 | **Channel Stats** | Subscribers, reach, growth, engagement analytics |
 | **Post Stats** | Per-post statistics with view/reaction graphs |
 | **Engagement Dashboard** | Top posts, best posting hours, growth trends |
@@ -77,7 +73,8 @@ Publishing · Editing · Scheduling · Analytics · Comments · Auto-Reply · Te
 - Node.js >= 18
 - pnpm
 - A Telegram bot added as an admin to your channel
-- (For discussion monitor) MTProto user account authorization
+- (For comments, stats, scheduling, reactions, admin management) MTProto user account authorization
+- (For comment tools) a discussion group linked to the channel
 
 ---
 
@@ -147,7 +144,7 @@ If you use multiple accounts, specify via `telegramAccountId` in the plugin conf
 
 ### 5. Allow tools in OpenClaw policy
 
-The plugin registers 5 tools. Allow the ones you need:
+The plugin registers 6 tools. Allow the ones you need:
 
 ```jsonc
 {
@@ -155,6 +152,7 @@ The plugin registers 5 tools. Allow the ones you need:
     "allow": [
       "tg_channel_admin",
       "tg_channel_post",
+      "tg_channel_comments",
       "tg_channel_stats",
       "tg_channel_schedule",
       "tg_channel_manage"
@@ -163,7 +161,7 @@ The plugin registers 5 tools. Allow the ones you need:
 }
 ```
 
-`tg_channel_admin` is the legacy monolithic tool (backward compatible). The four specialized tools (`post`, `stats`, `schedule`, `manage`) provide the same functionality split by domain. `stats` and `schedule` are only registered when MTProto is enabled.
+`tg_channel_admin` is the legacy monolithic tool for core channel actions. The five specialized tools (`post`, `comments`, `stats`, `schedule`, `manage`) provide the full functionality split by domain. `comments`, `stats`, and `schedule` are only registered when MTProto is enabled.
 
 ---
 
@@ -174,6 +172,7 @@ The plugin registers 5 tools. Allow the ones you need:
 | Field | Type | Description |
 |-------|------|-------------|
 | `channel.chatId` | string | Channel ID: `@username` or `-100...` |
+| `discussion.chatId` | string | Discussion group ID for comment tools |
 | `ownerAllowFrom` | string[] | Allowed sender IDs (user/agent account IDs) |
 
 ### Full configuration
@@ -191,9 +190,9 @@ The plugin registers 5 tools. Allow the ones you need:
         "chatId": "@your_channel"         // or "-1001234567890"
       },
 
-      // Discussion group linked to the channel (for comment monitoring)
+      // Discussion group linked to the channel (required for comment tools)
       "discussion": {
-        "chatId": "-1001234567890"        // the linked supergroup ID
+        "chatId": "-1001234567890"
       },
 
       // Allowed sender IDs
@@ -201,7 +200,8 @@ The plugin registers 5 tools. Allow the ones you need:
 
       // Default settings
       "defaults": {
-        "silent": false                    // send without notification
+        "silent": false,                   // send without notification
+        "parseMode": "HTML"                // default parse mode (HTML/Markdown/MarkdownV2)
       },
 
       // Destructive actions (edit, delete, pin/unpin, edit_admin)
@@ -214,35 +214,12 @@ The plugin registers 5 tools. Allow the ones you need:
         "mode": "json"
       },
 
-      // MTProto — required for stats, scheduling, reactions, admin, discussion monitor
+      // MTProto — required for comments, stats, scheduling, reactions, admin management
       "mtproto": {
         "enabled": false,
         "apiId": 12345678,
         "apiHash": "abcdef1234567890abcdef1234567890",
         "sessionPath": "~/.openclaw/plugins/telegram-admin-channel/mtproto.session"
-      },
-
-      // Auto-reply to comments (requires discussion.chatId + mtproto)
-      "autoReply": {
-        "enabled": false,
-        "mode": "simple",                  // "simple" = one-shot AI, "agent" = full agent sessions
-        // Agent mode settings (only used when mode = "agent")
-        "agentId": "discussion-responder", // agent ID from agents.list
-        "gatewayUrl": "http://127.0.0.1:18789",
-        "gatewayToken": "your-gateway-auth-token",
-        // Common settings
-        "intervalMinutes": 5,              // polling interval (min 3, default 5)
-        "maxRepliesPerBatch": 5,           // max LLM calls per tick
-        "cooldownPerThreadMinutes": 30     // don't reply to same thread within this window
-      },
-
-      // Comment notifications
-      "notifications": {
-        "onComment": {
-          "enabled": false,
-          "notifyChatId": "123456789",     // chat ID to receive notifications
-          "minInterval": 60                // throttle: min seconds between notifications
-        }
       }
     }
   }
@@ -260,7 +237,7 @@ Set `"dangerousActions": { "enabled": true }` to unlock them.
 
 ## MTProto Setup
 
-MTProto unlocks statistics, scheduled posts, reactions, admin management, and the discussion monitor. It uses a Telegram **user account** (not the bot).
+MTProto unlocks comments, statistics, scheduled posts, reactions, and admin management. It uses a Telegram **user account** (not the bot).
 
 ### 1. Get API credentials
 
@@ -278,6 +255,9 @@ The script will prompt for your phone number, verification code, and optional 2F
 ### 3. Update config
 
 ```jsonc
+"discussion": {
+  "chatId": "-100XXXXXXXXXX"
+},
 "mtproto": {
   "enabled": true,
   "apiId": 12345678,
@@ -287,135 +267,9 @@ The script will prompt for your phone number, verification code, and optional 2F
 
 ---
 
-## Discussion Monitor & Auto-Reply
-
-### The Problem
-
-OpenClaw's native `message_received` hook requires `requireMention: true` for groups, which means comments without @bot mentions are never seen. Setting `requireMention: false` causes the AI to reply to everything in the group.
-
-### The Solution
-
-The plugin runs an **independent discussion monitor** that polls the discussion group via MTProto (user account). OpenClaw's native processing is disabled for the discussion group — clean separation.
-
-```
-OpenClaw owns: channel + DMs
-Plugin owns:   discussion group (via MTProto)
-```
-
-### How It Works
-
-```
-Every N minutes (default: 5):
-  1. MTProto polls discussion group history (getHistory with minId tracking)
-  2. Filters: skip auto-forwarded posts, skip bot's own messages, skip non-threaded messages (only replies to channel posts)
-  3. Stores new comments (upsertComment with dedup)
-  4. Sends notification to owner (rate-limited)
-  5. If autoReply enabled: processes pending comments through AI
-     → AI generates reply → sent via Bot API to correct thread
-     → or AI returns nothing → marked as "skipped"
-```
-
-### Comment Lifecycle
-
-```
-New comment on a channel post (reply in discussion thread)
-  → discussion-monitor picks up via MTProto
-  → stored with status: "pending"
-  → auto-reply processes:
-      → AI reply generated → status: "replied" (replyMessageId saved)
-      → AI returns nothing → status: "skipped"
-  → or manually via tools:
-      → reply_comment → status: "replied"
-      → skip_comment → status: "skipped"
-```
-
-### Server Config Requirement
-
-**Disable OpenClaw's native processing** for the discussion group to avoid conflicts:
-
-```jsonc
-{
-  "channels": {
-    "telegram": {
-      "groups": {
-        "-100XXXXXXXXXX": {        // your discussion group ID
-          "enabled": false
-        }
-      }
-    }
-  }
-}
-```
-
-This makes OpenClaw ignore all messages from the discussion group. The plugin takes full ownership via MTProto.
-
-### Auto-Reply Parameters
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `mode` | `"simple"` | `"simple"` = one-shot AI, `"agent"` = full agent sessions via gateway |
-| `agentId` | `"discussion-responder"` | Agent ID for agent mode (from `agents.list`) |
-| `gatewayUrl` | `"http://127.0.0.1:18789"` | Gateway HTTP URL for agent mode |
-| `gatewayToken` | — | Gateway auth token (required for agent mode) |
-| `intervalMinutes` | 5 | How often to poll for new messages. Min ~3 (MTProto rate limits) |
-| `maxRepliesPerBatch` | 5 | Max LLM calls per tick. Remaining pending wait for next tick |
-| `cooldownPerThreadMinutes` | 30 | After replying in a thread, skip it for this duration |
-
-Most ticks are lightweight (one MTProto call + empty pending check). LLM is only invoked when there are actual pending comments.
-
-### Agent Mode
-
-Agent mode replaces the one-shot `getReplyFromConfig()` with full OpenClaw agent sessions. Each discussion thread gets its own persistent session with tools, history, and agent context.
-
-**How it works:**
-1. Comment arrives via MTProto poll → stored as "pending"
-2. Plugin sends HTTP POST to `{gatewayUrl}/v1/chat/completions` with:
-   - `x-openclaw-agent-id: {agentId}` — routes to a restricted agent
-   - `x-openclaw-session-key: discussion:thread:{threadId}` — per-thread persistence
-3. Gateway runs a full agent turn (tools, session history, IDENTITY.md)
-4. Plugin sends the reply text to Telegram via Bot API
-
-**Server setup for agent mode:**
-
-1. Enable chatCompletions endpoint in `openclaw.json`:
-```jsonc
-{
-  "gateway": {
-    "http": {
-      "endpoints": {
-        "chatCompletions": { "enabled": true }
-      }
-    }
-  }
-}
-```
-
-2. Add a `discussion-responder` agent to `agents.list`:
-```jsonc
-{
-  "agents": {
-    "list": [
-      { "id": "main", "default": true },
-      {
-        "id": "discussion-responder",
-        "workspace": "~/.openclaw/agents/discussion-responder",
-        "tools": {
-          "profile": "minimal",
-          "deny": ["group:runtime", "group:fs", "group:sessions", "group:ui"]
-        }
-      }
-    ]
-  }
-}
-```
-
-3. Create the agent workspace with an IDENTITY.md at `~/.openclaw/agents/discussion-responder/IDENTITY.md`.
-
----
-
 ## Tools
 
-The plugin registers 5 tools. The legacy `tg_channel_admin` contains all actions. The four specialized tools split them by domain.
+The plugin registers 6 tools. The legacy `tg_channel_admin` covers core channel actions. The five specialized tools split the full feature set by domain.
 
 ### `tg_channel_post` — Post Operations
 
@@ -426,11 +280,20 @@ The plugin registers 5 tools. The legacy `tg_channel_admin` contains all actions
 | `delete_post` | `messageIds` | Delete messages (batch) |
 | `forward_post` | `messageIds`, `toChatId`, `silent?` | Forward messages to another chat |
 | `sync` | — | Sync posts (MTProto preferred, HTML fallback) |
-| `list_recent_activity` | `limit?` | Show recent posts and comments |
+| `list_recent_activity` | `limit?` | Show recent posts |
 | `create_template` | `templateName`, `text`, `parseMode?` | Create a reusable template |
 | `list_templates` | — | List all templates |
 | `use_template` | `templateId` or `templateName`, `silent?` | Post from a template |
 | `delete_template` | `templateId` | Delete a template |
+
+### `tg_channel_comments` — Comments (MTProto)
+
+| Action | Parameters | Description |
+|--------|------------|-------------|
+| `list_comments` | `postMessageId?`, `limit?` | List recent comments, optionally only for a specific channel post |
+| `reply_comment` | `commentMessageId`, `replyText`, `postMessageId?`, `parseMode?` | Reply to a specific discussion comment |
+
+`tg_channel_comments` reads comments on demand from the linked discussion group via MTProto. Comments are not stored locally; replies are sent through the Bot API into the same discussion thread.
 
 ### `tg_channel_stats` — Statistics (MTProto)
 
@@ -462,13 +325,10 @@ Media parameters for `schedule_post`: `photoFileIds`, `photoPaths`, `videoFileId
 | `pin_post` | `messageId`, `silent?` | Pin a message |
 | `unpin_post` | `messageId` | Unpin a message |
 | `react` | `messageId`, `emoji` | Set a reaction (MTProto only) |
-| `search` | `query`, `searchType?`, `limit?` | Search posts/comments (`searchType`: post/comment/all) |
+| `search` | `query`, `limit?` | Search posts |
 | `status` | — | Plugin connection status |
 | `list_admins` | — | List channel admins (MTProto only) |
 | `edit_admin` | `userId`, `adminRights` | Edit admin rights (MTProto only) |
-| `list_pending_comments` | `limit?` | Show comments awaiting response |
-| `reply_comment` | `messageId`, `replyText`, `chatId?` | Reply to a specific comment |
-| `skip_comment` | `messageId`, `chatId?` | Mark a comment as skipped |
 
 ### Chat with the Agent — Examples
 
@@ -477,15 +337,14 @@ Media parameters for `schedule_post`: `photoFileIds`, `photoPaths`, `videoFileId
 > Edit post #42 to say "Updated text"
 > Pin post #42
 > Show me the recent activity in the channel
+> Show recent comments for post #42
+> Reply to comment #135 with "Thanks for the feedback!"
 > How many views did posts 42, 43, 44 get?
 > What are the channel stats lately?
 > Show me an engagement dashboard for the last 30 days
 > Schedule a post "See you soon!" for tomorrow at 10:00 UTC
 > Search for "product launch" in channel posts
 > Create a template "weekly-digest" with text "Weekly digest:\n..."
-> List pending comments
-> Reply to comment #135 with "Thanks for the feedback!"
-> Skip comment #136
 > List channel admins
 ```
 
@@ -499,7 +358,7 @@ Available in the OpenClaw chat interface (require auth):
 
 | Command | Description |
 |---------|-------------|
-| `/tgstatus` | Bot/MTProto connection status, post/comment counts |
+| `/tgstatus` | Bot/MTProto connection status, post counts |
 | `/tgscheduled` | List all pending scheduled posts |
 | `/tgstats` | Channel statistics (subscribers, views, shares, reactions) |
 
@@ -507,7 +366,7 @@ Available in the OpenClaw chat interface (require auth):
 
 ```bash
 openclaw telegram-admin auth     # Interactive MTProto authorization guide
-openclaw telegram-admin status   # Posts/comments count, MTProto status
+openclaw telegram-admin status   # Posts count, MTProto status
 ```
 
 ---
@@ -521,13 +380,13 @@ Plugin (src/index.ts)
 ├── Tools
 │   ├── tg_channel_admin        ← legacy monolithic (backward compat)
 │   ├── tg_channel_post         ← post, edit, delete, forward, sync, templates
+│   ├── tg_channel_comments     ← list comments, reply to comments (MTProto)
 │   ├── tg_channel_stats        ← views, channel/post stats, engagement (MTProto)
 │   ├── tg_channel_schedule     ← schedule, list, delete, send now (MTProto)
-│   └── tg_channel_manage       ← pin, react, search, status, admins, comments
+│   └── tg_channel_manage       ← pin, react, search, status, admins
 ├── Hooks
 │   └── message_received        ← auto-collect channel posts
 ├── Services
-│   ├── discussion-monitor      ← MTProto polling + comments + notifications + auto-reply
 │   └── telegram-admin-mtproto  ← MTProto lifecycle (connect/disconnect)
 ├── Commands
 │   ├── /tgstatus
@@ -537,7 +396,6 @@ Plugin (src/index.ts)
 │   └── telegram-admin auth|status
 └── Storage
     ├── PostStorage     (JSON, max 5000, file-locked)
-    ├── CommentStorage  (JSON, max 10000, file-locked, upsert with dedup)
     └── TemplateStorage (JSON, file-locked)
 ```
 
@@ -549,26 +407,14 @@ Plugin (src/index.ts)
 │                                                                 │
 │ Channel post → Bot API → OpenClaw → message_received hook       │
 │                                     → posts.upsertPost()        │
-│                                                                 │
-│ Auto-forwarded copy in discussion group                         │
-│                  → discussion-monitor sees isForward → SKIP     │
 └─────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────┐
-│ DISCUSSION GROUP (comments)                                     │
+│ DISCUSSION COMMENTS                                             │
 │                                                                 │
-│ Comment → Bot API → OpenClaw → enabled: false → DROP            │
-│                                                                 │
-│ Meanwhile, every 5 min:                                         │
-│ discussion-monitor → MTProto getHistory(minId) → new messages   │
-│   → filter (skip forwards, skip bot, skip empty, skip non-thread)│
-│   → comments.upsertComment() (dedup by messageId)               │
-│   → notify owner (rate-limited)                                 │
-│   → auto-reply (simple or agent mode):                          │
-│     simple: getReplyFromConfig() → one-shot AI text             │
-│     agent:  HTTP → gateway /v1/chat/completions                 │
-│             (per-thread session, tools, history)                 │
-│   → Bot API sendMessage (replyToMessageId + messageThreadId)    │
+│ Comment tool → MTProto getHistory(discussion group)             │
+│              → filter by thread/post                            │
+│              → Bot API reply_to_message for manual replies      │
 └─────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────┐
@@ -585,7 +431,6 @@ Plugin data is stored in `~/.openclaw/plugins/telegram-admin-channel/`:
 | File | Description |
 |------|-------------|
 | `posts.json` | Published and synced posts (max 5000, auto-rotated) |
-| `comments.json` | Comments from the discussion group (max 10000, auto-rotated) |
 | `templates.json` | Reusable post templates |
 | `mtproto.session` | MTProto session (if enabled) |
 
@@ -622,10 +467,10 @@ src/
 ├── tool.ts                # Legacy monolithic tg_channel_admin (backward compat)
 ├── tool-shared.ts         # Shared types, auth/dangerous checks, getConfig()
 ├── tool-post.ts           # tg_channel_post (post, edit, delete, forward, sync, templates)
+├── tool-comments.ts       # tg_channel_comments (list comments, reply to comments)
 ├── tool-stats.ts          # tg_channel_stats (views, channel/post stats, engagement)
 ├── tool-schedule.ts       # tg_channel_schedule (schedule, list, delete, send now)
-├── tool-manage.ts         # tg_channel_manage (pin, react, search, status, admins, comments)
-├── discussion-monitor.ts  # MTProto polling + comment storage + notifications + auto-reply
+├── tool-manage.ts         # tg_channel_manage (pin, react, search, status, admins)
 ├── hooks.ts               # message_received hook (channel posts only)
 ├── retry.ts               # withRetry() exponential backoff + Telegram 429 handling
 ├── storage.ts             # JSON file storage with file locking and auto-rotation
@@ -668,7 +513,7 @@ pnpm install && pnpm build
 ```
 
 ```jsonc
-// 3. Full setup with discussion monitor + auto-reply:
+// 3. Full setup with MTProto (comments, stats, scheduling, reactions, admin management):
 {
   "plugins": {
     "entries": {
@@ -683,31 +528,8 @@ pnpm install && pnpm build
             "enabled": true,
             "apiId": 12345678,
             "apiHash": "your_api_hash"
-          },
-          "autoReply": {
-            "enabled": true,
-            "mode": "agent",
-            "gatewayToken": "your-gateway-auth-token",
-            "intervalMinutes": 5,
-            "maxRepliesPerBatch": 5,
-            "cooldownPerThreadMinutes": 30
-          },
-          "notifications": {
-            "onComment": {
-              "enabled": true,
-              "notifyChatId": "your_telegram_id",
-              "minInterval": 60
-            }
           }
         }
-      }
-    }
-  },
-  // IMPORTANT: disable OpenClaw for the discussion group
-  "channels": {
-    "telegram": {
-      "groups": {
-        "-100XXXXXXXXXX": { "enabled": false }
       }
     }
   }

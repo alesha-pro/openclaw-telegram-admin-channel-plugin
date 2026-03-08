@@ -3,25 +3,22 @@ import { jsonResult } from "openclaw/plugin-sdk";
 
 import { TelegramAdminChannelConfigSchema } from "./schema.js";
 import type { TelegramAdminChannelConfig } from "./schema.js";
-import { PostStorage, CommentStorage, TemplateStorage } from "./storage.js";
+import { PostStorage, TemplateStorage } from "./storage.js";
 import { createToolFactory } from "./tool.js";
 import { createPostToolFactory } from "./tool-post.js";
 import { createStatsToolFactory } from "./tool-stats.js";
 import { createScheduleToolFactory } from "./tool-schedule.js";
 import { createManageToolFactory } from "./tool-manage.js";
+import { createCommentsToolFactory } from "./tool-comments.js";
 import { registerHooks } from "./hooks.js";
-import { startDiscussionMonitor } from "./discussion-monitor.js";
 import { MtprotoClient } from "./mtproto-client.js";
 import { resolveBotToken } from "./telegram-api.js";
-
-// Guard: discussion monitor must only start once even if register() is called per-agent
-let discussionMonitorStarted = false;
 
 const plugin = {
   id: "telegram-admin-channel",
   name: "Telegram Admin Channel",
   description:
-    "Admin assistant for a Telegram channel: posts, comments, basic analytics",
+    "Admin assistant for a Telegram channel: posts, analytics, scheduling",
 
   configSchema: {
     jsonSchema: TelegramAdminChannelConfigSchema as unknown as Record<
@@ -33,9 +30,6 @@ const plugin = {
   register(api: OpenClawPluginApi) {
     const dataDir = "~/.openclaw/plugins/telegram-admin-channel";
     const posts = new PostStorage(api.resolvePath(`${dataDir}/posts.json`));
-    const comments = new CommentStorage(
-      api.resolvePath(`${dataDir}/comments.json`),
-    );
     const templates = new TemplateStorage(
       api.resolvePath(`${dataDir}/templates.json`),
     );
@@ -60,16 +54,19 @@ const plugin = {
     }
 
     // Register legacy monolithic tool (backward compat) + new split tools
-    api.registerTool(createToolFactory(api, posts, comments, mtprotoClient, templates), {
+    api.registerTool(createToolFactory(api, posts, mtprotoClient, templates), {
       optional: true,
     });
-    api.registerTool(createPostToolFactory(api, posts, comments, mtprotoClient, templates), {
+    api.registerTool(createPostToolFactory(api, posts, mtprotoClient, templates), {
       optional: true,
     });
-    api.registerTool(createManageToolFactory(api, posts, comments, mtprotoClient), {
+    api.registerTool(createManageToolFactory(api, posts, mtprotoClient), {
       optional: true,
     });
     if (mtprotoClient) {
+      api.registerTool(createCommentsToolFactory(api, mtprotoClient), {
+        optional: true,
+      });
       api.registerTool(createStatsToolFactory(api, mtprotoClient), {
         optional: true,
       });
@@ -78,32 +75,10 @@ const plugin = {
       });
     }
 
-    // Register hooks (channel posts only — comments handled by discussion monitor)
+    // Register hooks (channel posts only)
     registerHooks(api, pluginConfig, posts);
 
-    // Register discussion monitor (MTProto-based comment polling + auto-reply)
-    // Guard prevents duplicate monitors when register() is called per-agent
-    if (pluginConfig?.discussion?.chatId && mtprotoClient && !discussionMonitorStarted) {
-      discussionMonitorStarted = true;
-      const stopMonitor = startDiscussionMonitor(
-        api,
-        pluginConfig,
-        mtprotoClient,
-        comments,
-        posts,
-      );
-      api.registerService({
-        id: "telegram-admin-discussion-monitor",
-        async start(ctx) {
-          ctx.logger.info("telegram-admin-discussion-monitor service started");
-        },
-        async stop() {
-          stopMonitor();
-        },
-      });
-    }
-
-    // U1/P7: Register MTProto as a background service for clean lifecycle
+    // Register MTProto as a background service for clean lifecycle
     if (mtprotoClient) {
       const client = mtprotoClient;
       api.registerService({
@@ -118,7 +93,7 @@ const plugin = {
       });
     }
 
-    // U2: Register slash commands for quick admin operations
+    // Register slash commands for quick admin operations
     if (pluginConfig) {
       const cfg = pluginConfig;
 
@@ -136,7 +111,6 @@ const plugin = {
           } catch { /* ignore */ }
 
           const allPosts = await posts.getAll();
-          const allComments = await comments.getFiltered();
 
           const lines = [
             `**Telegram Admin Channel Status**`,
@@ -144,7 +118,6 @@ const plugin = {
             `MTProto: ${mtprotoClient?.isConnected ? "connected" : cfg.mtproto?.enabled ? "enabled (not connected)" : "disabled"}`,
             `Channel: ${cfg.channel.chatId}`,
             `Posts: ${allPosts.length}`,
-            `Comments: ${allComments.length}`,
             `Dangerous actions: ${cfg.dangerousActions?.enabled ? "enabled" : "disabled"}`,
           ];
           return { text: lines.join("\n") };
@@ -202,7 +175,7 @@ const plugin = {
       });
     }
 
-    // U6: Register CLI for MTProto auth
+    // Register CLI for MTProto auth
     api.registerCli((ctx) => {
       const cmd = ctx.program
         .command("telegram-admin")
@@ -225,9 +198,7 @@ const plugin = {
         .description("Show plugin status")
         .action(async () => {
           const allPosts = await posts.getAll();
-          const allComments = await comments.getFiltered();
           ctx.logger.info(`Posts: ${allPosts.length}`);
-          ctx.logger.info(`Comments: ${allComments.length}`);
           ctx.logger.info(`MTProto: ${mtprotoClient ? "configured" : "not configured"}`);
         });
     }, { commands: ["telegram-admin"] });
